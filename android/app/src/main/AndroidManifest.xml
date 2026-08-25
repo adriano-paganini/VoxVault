@@ -13,7 +13,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.VoxVault">
         <activity
-            android:name=".MainActivity"
+            android:name="com.paganini.voxvault.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.VoxVault"
             android:windowSoftInputMode="adjustResize">

@@ -3,13 +3,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.voxvault"
+    namespace = "com.paganini.voxvault"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.voxvault"
+        applicationId = "com.paganini.voxvault"
         minSdk = 24
         targetSdk = 37
         versionCode = 1

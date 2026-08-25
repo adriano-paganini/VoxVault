@@ -1,4 +1,4 @@
-package com.example.voxvault
+package com.paganini.voxvault
 
 import org.junit.Test
 
