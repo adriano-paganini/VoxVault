@@ -4,15 +4,18 @@ import android.location.Location
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.paganini.voxvault.dataClass.Recording
+import com.paganini.voxvault.service.RecordingService
 import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
+    val recordingService = RecordingService()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -25,6 +28,26 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
+        recordingService.onRecordingStart = {
+            addTestRecordings()
+        }
+
+        recordingService.onRecordingEnd = {
+            clearTestRecordings()
+        }
+
+        val recordToggleButton = findViewById<ToggleButton>(R.id.record_toggle)
+        recordToggleButton.setOnClickListener{
+            recordingService.toggle()
+        }
+    }
+
+    fun clearTestRecordings(){
+        val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+        parent.removeAllViews()
+    }
+
+    fun addTestRecordings(){
         val recordings = listOf(
             Recording(Date(), Date(), Location("gps"), "Test1"),
             Recording(Date(), Date(), Location("gps"), "Test2"),
@@ -53,7 +76,6 @@ class MainActivity : AppCompatActivity() {
         for (recording in recordings){
             addToScrollableList(recording)
         }
-
     }
 
     fun addToScrollableList(recording: Recording){
