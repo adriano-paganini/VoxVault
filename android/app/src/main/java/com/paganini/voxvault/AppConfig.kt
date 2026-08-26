@@ -19,6 +19,16 @@ object AppConfig {
          * CRITICAL: This must match [AppConfig.VAD.FRAME_SIZE] numeric value.
          */
         const val BUFFER_SIZE = 1536 
+
+        /**
+         * Duration of one buffer in milliseconds.
+         * Calculated as: (BUFFER_SIZE / SAMPLE_RATE) * 1000
+         */
+        const val MS_PER_FRAME = ((BUFFER_SIZE*1000)/SAMPLE_RATE)
+        /**
+         * Duration of silence to stop a recording in milliseconds
+         */
+        const val RECORDING_MAX_SILENCE = 20000
     }
 
     object VAD {
@@ -30,8 +40,18 @@ object AppConfig {
     }
 
     object UI {
-        val COLOR_SPEECH = Color.GREEN
-        val COLOR_SILENCE = Color.RED
+        val COLOR_SILENCE = Color.RED    // 0
+        val COLOR_SPEECH = Color.GREEN   // 1
+        val COLOR_TRANSITION = Color.rgb(255, 165, 0) // 2: Orange
+
+        fun getStateColor(state: Int): Int {
+            return when (state) {
+                1 -> COLOR_SPEECH
+                2 -> COLOR_TRANSITION
+                else -> COLOR_SILENCE
+            }
+        }
+
         const val LIST_ITEM_PADDING_TOP = 100
     }
 

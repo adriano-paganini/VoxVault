@@ -60,16 +60,12 @@ class MainActivity : AppCompatActivity() {
         
         // Initial color setup
         if (listeningService.isListening) {
-            mainView.setBackgroundColor(if (listeningService.sharedSpeaking) AppConfig.UI.COLOR_SPEECH else AppConfig.UI.COLOR_SILENCE)
+            mainView.setBackgroundColor(AppConfig.UI.getStateColor(listeningService.sharedSpeaking))
         }
 
         listeningService.speakingListener = {
             runOnUiThread {
-                if (listeningService.sharedSpeaking) {
-                    mainView.setBackgroundColor(AppConfig.UI.COLOR_SPEECH)
-                } else {
-                    mainView.setBackgroundColor(AppConfig.UI.COLOR_SILENCE)
-                }
+                mainView.setBackgroundColor(AppConfig.UI.getStateColor(listeningService.sharedSpeaking))
             }
         }
 
