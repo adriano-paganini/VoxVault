@@ -1,7 +1,6 @@
 package com.paganini.voxvault
 
 import android.Manifest
-import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Bundle
 import android.widget.LinearLayout
@@ -9,17 +8,15 @@ import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.paganini.voxvault.dataClass.Recording
 import com.paganini.voxvault.service.ListeningService
-import java.util.Collections.emptyList
 import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
-    val listeningService = ListeningService()
+    private val listeningService by lazy { ListeningService(this) }
 
     private val requestMultiplePermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
