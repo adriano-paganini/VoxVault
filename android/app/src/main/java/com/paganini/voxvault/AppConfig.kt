@@ -29,6 +29,14 @@ object AppConfig {
          * Duration of silence to stop a recording in milliseconds
          */
         const val RECORDING_MAX_SILENCE = 20000
+
+        const val PRE_RECORDING_BUFFER_LENGTH_MS = 5000
+
+        /**
+         * Number of samples required to store [PRE_RECORDING_BUFFER_LENGTH_MS] of audio.
+         * (16,000 * 5,000) / 1,000 = 80,000
+         */
+        const val PRE_RECORDING_BUFFER_SIZE = (SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000
     }
 
     object VAD {

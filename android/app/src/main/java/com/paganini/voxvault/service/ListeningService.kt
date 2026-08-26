@@ -7,7 +7,6 @@ import android.media.AudioRecord
 import androidx.core.content.ContextCompat
 import com.konovalov.vad.silero.VadSilero
 import com.paganini.voxvault.AppConfig
-import java.io.File
 
 class ListeningService(
     private val context: Context
@@ -30,6 +29,11 @@ class ListeningService(
 
     private var audioListener: AudioRecord? = null
 
+    private var ringBufferInsertionIndex = 0
+    private var ringBufferReadIndex = 0
+    private var samplesInRingBuffer = 0
+    private val ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+
     fun toggle() {
         if (isListening) {
             endListening()
@@ -38,7 +42,6 @@ class ListeningService(
         }
         isListening = !isListening
     }
-
 
     fun setupListening() {
         if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)) {
@@ -83,6 +86,7 @@ class ListeningService(
         while (isListening) {
             val readResult = audioListener?.read(buffer, 0, AppConfig.Audio.BUFFER_SIZE)
             if (readResult != null && readResult > 0) {
+                if(recordingState==0)ringBufferAppend(buffer)
                 val isSpeech = vad.isSpeech(buffer)
 
                 if (isSpeech) {
@@ -117,6 +121,14 @@ class ListeningService(
                 if (silenceDuration >= AppConfig.Audio.RECORDING_MAX_SILENCE){
                     //finish and save the recording
                     recordingState = 0
+                    
+                    // Reset the indices
+                    ringBufferInsertionIndex = 0
+                    ringBufferReadIndex = 0
+                    samplesInRingBuffer = 0
+                    
+                    // Actually zero out the array memory
+                    ringBuffer.fill(0)
 
                     sharedSpeaking = 0
                     speakingListener?.invoke()
@@ -130,5 +142,24 @@ class ListeningService(
         audioListener?.stop()
         audioListener?.release()
         audioListener = null
+        samplesInRingBuffer = 0
+    }
+
+    fun ringBufferAppend(data: ShortArray) {
+        val remainingSpace = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE - ringBufferInsertionIndex
+
+        if (remainingSpace >= AppConfig.Audio.BUFFER_SIZE) {
+            System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, AppConfig.Audio.BUFFER_SIZE)
+        } else {
+            System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, remainingSpace)
+            System.arraycopy(data, remainingSpace, ringBuffer, 0, AppConfig.Audio.BUFFER_SIZE - remainingSpace)
+        }
+
+        ringBufferInsertionIndex = (ringBufferInsertionIndex + AppConfig.Audio.BUFFER_SIZE) % AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+        
+        samplesInRingBuffer = minOf(
+            samplesInRingBuffer + AppConfig.Audio.BUFFER_SIZE,
+            AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+        )
     }
 }
