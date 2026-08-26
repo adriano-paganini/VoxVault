@@ -14,18 +14,19 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.paganini.voxvault.dataClass.Recording
 import com.paganini.voxvault.service.ListeningService
-import java.security.Permission
+import java.util.Collections.emptyList
 import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
     val listeningService = ListeningService()
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ){
-        isGranted: Boolean ->
-        if (!isGranted) {
+    private val requestMultiplePermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val micGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
+
+        if (!micGranted) {
             finish()
         }
     }
@@ -46,20 +47,14 @@ class MainActivity : AppCompatActivity() {
             listeningService.toggle()
         }
 
-        checkAndRequestPermission(Manifest.permission.RECORD_AUDIO,true)
-    }
+        val permissionsToRequest = arrayOf(
+            Manifest.permission.RECORD_AUDIO,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.INTERNET)
 
-    private fun checkAndRequestPermission(permission: String, hardRequirement:Boolean) {
-        when {
-            ContextCompat.checkSelfPermission(this, permission)
-                    == PackageManager.PERMISSION_GRANTED -> {
-            }
-            shouldShowRequestPermissionRationale(permission) -> {
-            }
-            else -> {
-                requestPermissionLauncher.launch(permission)
-            }
-        }
+
+        requestMultiplePermissionsLauncher.launch(permissionsToRequest)
     }
 
     fun clearTestRecordings(){
