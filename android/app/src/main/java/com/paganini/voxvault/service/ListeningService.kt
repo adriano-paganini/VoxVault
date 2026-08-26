@@ -3,14 +3,10 @@ package com.paganini.voxvault.service
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaRecorder
 import androidx.core.content.ContextCompat
 import com.konovalov.vad.silero.VadSilero
-import com.konovalov.vad.silero.config.FrameSize
-import com.konovalov.vad.silero.config.Mode
-import com.konovalov.vad.silero.config.SampleRate
+import com.paganini.voxvault.AppConfig
 
 class ListeningService(
     private val context: Context
@@ -24,18 +20,14 @@ class ListeningService(
     private var listeningThread: Thread? = null
     private val vad: VadSilero = VadSilero(
         appContext,
-        sampleRate = SampleRate.SAMPLE_RATE_16K,
-        frameSize = FrameSize.FRAME_SIZE_512,
-        mode = Mode.NORMAL,
-        silenceDurationMs = 300,
-        speechDurationMs = 50
+        sampleRate = AppConfig.VAD.SAMPLE_RATE,
+        frameSize = AppConfig.VAD.FRAME_SIZE,
+        mode = AppConfig.VAD.MODE,
+        silenceDurationMs = AppConfig.VAD.SILENCE_DURATION_MS,
+        speechDurationMs = AppConfig.VAD.SPEECH_DURATION_MS
     )
 
     private var audioListener: AudioRecord? = null
-    private val sampleRate = 16000
-    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
-    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-    private val bufferSize = 512
 
     fun toggle() {
         if (isListening) {
@@ -49,17 +41,21 @@ class ListeningService(
 
     fun setupListening() {
         if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)) {
-            val minBufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            val minBufferSize = AudioRecord.getMinBufferSize(
+                AppConfig.Audio.SAMPLE_RATE,
+                AppConfig.Audio.CHANNEL_CONFIG,
+                AppConfig.Audio.AUDIO_FORMAT
+            )
             if (ContextCompat.checkSelfPermission(
                     appContext,
                     Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED
             ) {
                 audioListener = AudioRecord(
-                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                    sampleRate,
-                    channelConfig,
-                    audioFormat,
+                    AppConfig.Audio.AUDIO_SOURCE,
+                    AppConfig.Audio.SAMPLE_RATE,
+                    AppConfig.Audio.CHANNEL_CONFIG,
+                    AppConfig.Audio.AUDIO_FORMAT,
                     minBufferSize
                 )
             }
@@ -79,10 +75,10 @@ class ListeningService(
         }
 
         fun listeningLoop() {
-            val buffer = ShortArray(bufferSize)
+            val buffer = ShortArray(AppConfig.Audio.BUFFER_SIZE)
             while (isListening) {
-                val readResult = audioListener?.read(buffer,0,bufferSize)
-                if (readResult != null && readResult >0) {
+                val readResult = audioListener?.read(buffer, 0, AppConfig.Audio.BUFFER_SIZE)
+                if (readResult != null && readResult > 0) {
                     val isSpeech = vad.isSpeech(buffer)
 
                     if(isSpeech != sharedSpeaking){

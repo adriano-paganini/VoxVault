@@ -2,7 +2,6 @@ package com.paganini.voxvault
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.widget.LinearLayout
@@ -61,15 +60,15 @@ class MainActivity : AppCompatActivity() {
         
         // Initial color setup
         if (listeningService.isListening) {
-            mainView.setBackgroundColor(if (listeningService.sharedSpeaking) Color.GREEN else Color.RED)
+            mainView.setBackgroundColor(if (listeningService.sharedSpeaking) AppConfig.UI.COLOR_SPEECH else AppConfig.UI.COLOR_SILENCE)
         }
 
         listeningService.speakingListener = {
             runOnUiThread {
                 if (listeningService.sharedSpeaking) {
-                    mainView.setBackgroundColor(Color.GREEN)
+                    mainView.setBackgroundColor(AppConfig.UI.COLOR_SPEECH)
                 } else {
-                    mainView.setBackgroundColor(Color.RED)
+                    mainView.setBackgroundColor(AppConfig.UI.COLOR_SILENCE)
                 }
             }
         }
@@ -80,12 +79,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAppPermissions() {
-        val permissionsToRequest = arrayOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.INTERNET
-        )
+        val permissionsToRequest = AppConfig.Permissions.REQUIRED
 
         // Filter out permissions that are already granted
         val missing = permissionsToRequest.filter {
