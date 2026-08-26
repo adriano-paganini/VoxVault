@@ -79,7 +79,7 @@ class ListeningService(
         }
 
         fun listeningLoop() {
-            var buffer = ShortArray(bufferSize)
+            val buffer = ShortArray(bufferSize)
             while (isListening) {
                 val readResult = audioListener?.read(buffer,0,bufferSize)
                 if (readResult != null && readResult >0) {

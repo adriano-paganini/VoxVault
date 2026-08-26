@@ -3,7 +3,6 @@ package com.paganini.voxvault
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.location.Location
 import android.os.Bundle
 import android.view.View
 import android.widget.LinearLayout
@@ -17,7 +16,6 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
 import com.paganini.voxvault.ViewModel.MainViewModel
 import com.paganini.voxvault.dataClass.Recording
-import java.util.Date
 import kotlin.getValue
 
 class MainActivity : AppCompatActivity() {
@@ -98,43 +96,6 @@ class MainActivity : AppCompatActivity() {
             requestMultiplePermissionsLauncher.launch(missing.toTypedArray())
         }
     }
-
-    fun clearTestRecordings() {
-        val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-        parent.removeAllViews()
-    }
-
-    fun addTestRecordings() {
-        val recordings = listOf(
-            Recording(Date(), Date(), Location("gps"), "Test1"),
-            Recording(Date(), Date(), Location("gps"), "Test2"),
-            Recording(Date(), Date(), Location("gps"), "Test3"),
-            Recording(Date(), Date(), Location("gps"), "Test4"),
-            Recording(Date(), Date(), Location("gps"), "Test5"),
-            Recording(Date(), Date(), Location("gps"), "Test6"),
-            Recording(Date(), Date(), Location("gps"), "Test7"),
-            Recording(Date(), Date(), Location("gps"), "Test1"),
-            Recording(Date(), Date(), Location("gps"), "Test2"),
-            Recording(Date(), Date(), Location("gps"), "Test3"),
-            Recording(Date(), Date(), Location("gps"), "Test4"),
-            Recording(Date(), Date(), Location("gps"), "Test5"),
-            Recording(Date(), Date(), Location("gps"), "Test6"),
-            Recording(Date(), Date(), Location("gps"), "Test7"),
-            Recording(Date(), Date(), Location("gps"), "Test1"),
-            Recording(Date(), Date(), Location("gps"), "Test2"),
-            Recording(Date(), Date(), Location("gps"), "Test3"),
-            Recording(Date(), Date(), Location("gps"), "Test4"),
-            Recording(Date(), Date(), Location("gps"), "Test5"),
-            Recording(Date(), Date(), Location("gps"), "Test6"),
-            Recording(Date(), Date(), Location("gps"), "Test7"),
-            Recording(Date(), Date(), Location("gps"), "Test8")
-        )
-
-        for (recording in recordings) {
-            addToScrollableList(recording)
-        }
-    }
-
     fun addToScrollableList(recording: Recording) {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
         parent.addView(recording.textView(this))
