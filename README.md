@@ -1,93 +1,83 @@
 # VoxVault
 
-VoxVault is a privacy-focused voice archive that turns personal recordings into a searchable AI-powered knowledge base.
+![Overview](docs/overview.png)
 
-The goal is simple: capture thoughts, conversations, and ideas through voice, while keeping ownership of the data.
+VoxVault is a privacy-focused, self-hosted AI voice archive that transforms spoken information into searchable knowledge.
+
+Record a thought on your phone, and VoxVault turns it into a transcribed, tagged, and searchable entry in your own personal knowledge base — with no data ever leaving infrastructure you control.
 
 ## Why VoxVault?
 
-Modern AI makes it possible to transform voice recordings into structured knowledge:
+Voice is one of the fastest and most natural ways to capture an idea, a meeting note, or a passing thought. But once it's recorded, it's usually stuck — buried in a pile of audio files with no easy way to find it again later.
 
-- Record audio from your phone
-- Automatically transcribe speech
-- Extract metadata and context
-- Search previous recordings using semantic similarity
+VoxVault exists because:
 
-Unlike many cloud-based assistants, VoxVault is designed around self-hosting and user-controlled data.
+- **Voice is natural.** Talking is faster than typing, especially for capturing ideas on the go.
+- **Recordings are hard to search.** Without transcription and indexing, a voice memo is effectively write-only.
+- **AI makes retrieval possible.** Automatic transcription, semantic embeddings, and enrichment turn raw audio into something you can actually query.
+- **You should own your data.** Personal recordings, transcripts, and the meaning derived from them belong on infrastructure you control — not a third-party cloud.
 
-## Core Architecture
+## Features
+
+- 🎙️ Voice recording from an Android client
+- 📝 Automatic speech-to-text transcription
+- 🔍 Semantic search across your recordings
+- 🧠 Optional AI enrichment (summaries, tags, categorization)
+- 🏠 Fully self-hostable
+- 🔒 Privacy-first: your recordings and transcripts stay on your infrastructure
+
+## Architecture
 
 ![Architecture](docs/architecture.png)
 
-The system consists of four main parts:
+VoxVault is made up of a small set of cooperating components:
 
-1. **Mobile application**
-   - Records audio
-   - Collects metadata
-   - Uploads recordings
+- **Android Application** — records audio, keeps a short local buffer, and handles uploading and querying.
+- **Network Layer** — routes traffic between the phone and the backend. The reference deployment uses a private VPN mesh with a reverse proxy in front of the API, but this layer can be replaced depending on deployment preferences (see [Deployment](#deployment)).
+- **Backend API** — receives uploads, authenticates clients, coordinates AI processing, and exposes search/query endpoints.
+- **AI Processing Pipeline** — a set of independent workers:
+  - **Speech Recognition Worker** — converts audio into text.
+  - **Embedding Worker** — generates semantic and/or speaker embeddings used for similarity search and finding related memories.
+  - **Analysis Worker** — optional enrichment such as summaries, tags, and structured metadata, typically powered by a local LLM.
+- **Storage** — a relational database with vector search support holds transcripts, metadata, and embeddings, with optional object storage for the original audio files.
 
-2. **Backend API**
-   - Receives recordings
-   - Coordinates processing
-   - Provides search access
+The component-level relationship between the API, workers, and storage is shown below:
 
-3. **AI processing pipeline**
-   - Speech-to-text transcription
-   - Embedding generation
-   - Optional analysis and summarization
+![Component Diagram](docs/component-diagram.png)
 
-4. **Storage layer**
-   - Stores recordings
-   - Stores transcripts
-   - Stores embeddings and metadata
-
-## Data Flow
+## How It Works
 
 ![Data Flow](docs/data-flow.png)
 
-A typical recording follows this path:
+1. **Recording** — The Android app records audio and buffers it locally.
+2. **Upload** — Once a recording is finalized, the app uploads it to the backend over the network layer.
+3. **Processing** — The backend forwards the audio to the speech recognition worker, which produces a transcript. Embedding and analysis workers can further enrich the entry.
+4. **Storage** — The transcript, embeddings, and any generated metadata are persisted in the database.
+5. **Search** — The app (or any client of the API) can later query the stored knowledge using semantic search.
 
-1. Audio is captured on the phone
-2. The recording is uploaded securely
-3. Speech recognition creates a transcript
-4. AI processing creates searchable representations
-5. Metadata, transcripts and embeddings are stored
-6. The user can search and retrieve previous recordings
-
-## Deployment and Networking
+## Deployment
 
 ![Deployment](docs/deployment.png)
 
-VoxVault can be deployed on a personal server, homelab, or cloud infrastructure.
+The diagram above shows one reference deployment: a phone connecting over a private VPN tunnel to a single home server, with the backend and workers running as containerized services alongside the database.
 
-The reference deployment uses:
+This is an example, not a requirement. The networking and routing layer, container runtime, and OS shown are all specific to this reference setup — you are free to substitute your own. Common alternatives for the network/routing layer include:
 
-- Ubuntu server
-- Docker containers
-- Caddy as reverse proxy
-- Tailscale for private networking
+- Public HTTPS with a standard TLS certificate
+- Cloudflare Tunnel
+- Nginx or Traefik as the reverse proxy
+- A different VPN mesh
+- A local-only deployment with no external exposure at all
 
-Example routing:
-
-Phone → Tailscale → Caddy → VoxVault API → Processing Services
-
-This is only one possible setup. The networking layer is intentionally flexible. Users can instead use:
-
-- Traditional HTTPS with public domains
-- VPN solutions other than Tailscale
-- Cloud reverse proxies
-- Local-only deployments
-
-The internal service architecture does not depend on a specific networking solution.
+VoxVault's architecture does not depend on any one of these choices.
 
 ## Privacy
 
-VoxVault follows a privacy-first approach:
+VoxVault is designed to be self-hosted end to end:
 
-- No mandatory external cloud services
-- User-controlled storage
-- Self-hosted processing
-- Private communication channels
+- All recordings, transcripts, embeddings, and metadata are stored on infrastructure you control.
+- No cloud service is required for core functionality.
+- AI processing (transcription, embeddings, enrichment) can run entirely on local/self-hosted models.
 
 ## Repository Structure
 
@@ -96,29 +86,9 @@ VoxVault/
 ├── android/
 ├── backend/
 ├── docs/
-│   ├── architecture.png
-│   ├── data-flow.png
-│   └── deployment.png
 └── README.md
 ```
 
-## Roadmap
+## Contributing
 
-### Recording
-- Android recording client
-- Upload management
-- Recording library
-
-### AI Processing
-- Speech recognition
-- Transcript generation
-- Embeddings
-
-### Knowledge System
-- Semantic search
-- Summaries
-- Personal knowledge retrieval
-
-## License
-
-To be decided.
+Issues and pull requests are welcome. If you build a different deployment setup (different reverse proxy, different VPN, cloud-based, etc.), consider documenting it — VoxVault's architecture is intentionally deployment-agnostic.
