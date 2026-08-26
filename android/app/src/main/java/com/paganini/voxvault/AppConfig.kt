@@ -48,8 +48,8 @@ object AppConfig {
     }
 
     object UI {
-        val COLOR_SILENCE = Color.RED    // 0
-        val COLOR_SPEECH = Color.GREEN   // 1
+        const val COLOR_SILENCE = Color.RED    // 0
+        const val COLOR_SPEECH = Color.GREEN   // 1
         val COLOR_TRANSITION = Color.rgb(255, 165, 0) // 2: Orange
 
         fun getStateColor(state: Int): Int {
@@ -61,6 +61,8 @@ object AppConfig {
         }
 
         const val LIST_ITEM_PADDING_TOP = 100
+        const val NOTIFICATION_CHANNEL_ID = "voxvault_listening_channel"
+        const val NOTIFICATION_ID = 1001
     }
 
     object Permissions {
@@ -68,7 +70,7 @@ object AppConfig {
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.ACCESS_COARSE_LOCATION,
             Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.INTERNET
+            Manifest.permission.POST_NOTIFICATIONS
         )
     }
 }
