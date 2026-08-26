@@ -18,7 +18,7 @@ class ListeningService(
 
     var speakingListener: (()->Unit)?=null
     var sharedSpeaking = false
-    private var isListening = false
+    var isListening = false
     private val appContext = context.applicationContext
 
     private var listeningThread: Thread? = null
