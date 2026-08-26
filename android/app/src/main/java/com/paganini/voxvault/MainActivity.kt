@@ -3,7 +3,6 @@ package com.paganini.voxvault
 import android.location.Location
 import android.os.Bundle
 import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.enableEdgeToEdge
@@ -80,12 +79,7 @@ class MainActivity : AppCompatActivity() {
 
     fun addToScrollableList(recording: Recording){
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-
-        val text = TextView(this)
-        text.text = recording.title
-        text.setPadding(0,100,0,0)
-
-        parent.addView(text)
+        parent.addView(recording.textView(this))
 
     }
 
