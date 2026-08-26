@@ -1,20 +1,34 @@
 package com.paganini.voxvault
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Bundle
 import android.widget.LinearLayout
 import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.paganini.voxvault.dataClass.Recording
-import com.paganini.voxvault.service.RecordingService
+import com.paganini.voxvault.service.ListeningService
+import java.security.Permission
 import java.util.Date
 
 class MainActivity : AppCompatActivity() {
 
-    val recordingService = RecordingService()
+    val listeningService = ListeningService()
+
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ){
+        isGranted: Boolean ->
+        if (!isGranted) {
+            finish()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,17 +41,24 @@ class MainActivity : AppCompatActivity() {
             insets
         }
 
-        recordingService.onRecordingStart = {
-            addTestRecordings()
+        val listeningToggleButton = findViewById<ToggleButton>(R.id.listeningToggle)
+        listeningToggleButton.setOnClickListener{
+            listeningService.toggle()
         }
 
-        recordingService.onRecordingEnd = {
-            clearTestRecordings()
-        }
+        checkAndRequestPermission(Manifest.permission.RECORD_AUDIO,true)
+    }
 
-        val recordToggleButton = findViewById<ToggleButton>(R.id.record_toggle)
-        recordToggleButton.setOnClickListener{
-            recordingService.toggle()
+    private fun checkAndRequestPermission(permission: String, hardRequirement:Boolean) {
+        when {
+            ContextCompat.checkSelfPermission(this, permission)
+                    == PackageManager.PERMISSION_GRANTED -> {
+            }
+            shouldShowRequestPermissionRationale(permission) -> {
+            }
+            else -> {
+                requestPermissionLauncher.launch(permission)
+            }
         }
     }
 
