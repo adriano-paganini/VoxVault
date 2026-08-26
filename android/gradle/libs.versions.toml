@@ -10,6 +10,7 @@ constraintlayout = "2.1.4"
 activityKtx = "1.8.0"
 navigationFragmentKtx = "2.6.0"
 navigationUiKtx = "2.6.0"
+silero = "2.0.10"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -22,6 +23,7 @@ androidx-constraintlayout = { group = "androidx.constraintlayout", name = "const
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 androidx-navigation-fragment-ktx = { group = "androidx.navigation", name = "navigation-fragment-ktx", version.ref = "navigationFragmentKtx" }
 androidx-navigation-ui-ktx = { group = "androidx.navigation", name = "navigation-ui-ktx", version.ref = "navigationUiKtx" }
+silero = { module = "com.github.gkonovalov.android-vad:silero", version.ref = "silero" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

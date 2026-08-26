@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
-import android.media.MediaPlayer
 import android.media.MediaRecorder
 
 class ListeningService(
@@ -13,7 +12,6 @@ class ListeningService(
     var isListening = false
 
     private var audioRecord: AudioRecord? = null
-    var mediaPlayer: MediaPlayer? = null
 
     private val sampleRate = 16000
     private val channelConfig = AudioFormat.CHANNEL_IN_MONO
