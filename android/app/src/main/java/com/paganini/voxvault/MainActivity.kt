@@ -1,8 +1,10 @@
 package com.paganini.voxvault
 
 import android.Manifest
+import android.graphics.Color
 import android.location.Location
 import android.os.Bundle
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.ToggleButton
 import androidx.appcompat.app.AppCompatActivity
@@ -42,6 +44,17 @@ class MainActivity : AppCompatActivity() {
         val listeningToggleButton = findViewById<ToggleButton>(R.id.listeningToggle)
         listeningToggleButton.setOnClickListener{
             listeningService.toggle()
+        }
+
+        val mainView = findViewById<View>(R.id.main)
+        listeningService.speakingListener = {
+            runOnUiThread {
+                if (listeningService.sharedSpeaking) {
+                    mainView.setBackgroundColor(Color.GREEN)
+                } else {
+                    mainView.setBackgroundColor(Color.RED)
+                }
+            }
         }
 
         val permissionsToRequest = arrayOf(
