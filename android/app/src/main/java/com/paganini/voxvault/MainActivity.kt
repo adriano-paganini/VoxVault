@@ -7,6 +7,8 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
+import android.widget.Button
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
@@ -15,6 +17,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.children
+import androidx.core.view.isEmpty
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.paganini.voxvault.viewModel.MainViewModel
@@ -133,6 +137,34 @@ class MainActivity : AppCompatActivity() {
         listeningToggleButton.setOnClickListener {
             currentService?.toggle()
         }
+
+        val listeningSelectAllButton = findViewById<Button>(R.id.selectAll)
+        listeningSelectAllButton.setOnClickListener {
+            val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+            val anyUnchecked = parent.children.any { child ->
+                !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
+            }
+
+            parent.children.forEach { child ->
+                child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = anyUnchecked
+            }
+            updateSelectAllButtonText()
+        }
+    }
+
+    private fun updateSelectAllButtonText() {
+        val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+        val selectAllButton = findViewById<Button>(R.id.selectAll)
+
+        val anyUnchecked = parent.children.any { child ->
+            !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
+        }
+
+        if (anyUnchecked || parent.isEmpty()) {
+            selectAllButton.setText(R.string.select_all)
+        } else {
+            selectAllButton.setText(R.string.deselect_all)
+        }
     }
     // endregion
 
@@ -174,9 +206,13 @@ class MainActivity : AppCompatActivity() {
     // region List Management
     fun addToScrollableList(recording: Recording) {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-        if (!displayedRecordings.contains(recording.name)){
+        if (!displayedRecordings.contains(recording.name)) {
             displayedRecordings.add(recording.name)
-            parent.addView(recording.getView(this, parent))
+            val view = recording.getView(this, parent)
+            view.findViewById<CheckBox>(R.id.recordingCheckbox).setOnClickListener {
+                updateSelectAllButtonText()
+            }
+            parent.addView(view)
         }
     }
     // endregion

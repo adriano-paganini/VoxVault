@@ -3,6 +3,7 @@
     <string name="listening_on">Stop</string>
     <string name="listening_off">Listen</string>
     <string name="select_all">Select All</string>
+    <string name="deselect_all">Deselect All</string>
     <string name="upload">Upload</string>
     <string name="delete">Delete</string>
     <string name="recordings_title">Recordings</string>
