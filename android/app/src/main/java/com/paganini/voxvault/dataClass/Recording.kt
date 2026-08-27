@@ -3,8 +3,10 @@ package com.paganini.voxvault.dataClass
 import android.content.Context
 import android.view.View
 import android.widget.TextView
+import kotlinx.serialization.InternalSerializationApi
 import kotlinx.serialization.Serializable
 
+@OptIn(InternalSerializationApi::class)
 @Serializable
 data class Recording(
     var name: String = "",
