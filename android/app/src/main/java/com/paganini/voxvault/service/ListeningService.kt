@@ -16,6 +16,9 @@ import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.konovalov.vad.silero.VadSilero
 import com.paganini.voxvault.AppConfig
 import com.paganini.voxvault.MainActivity
@@ -27,6 +30,7 @@ import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.min
 
 class ListeningService : Service() {
 
@@ -48,6 +52,7 @@ class ListeningService : Service() {
     private var chunkCounter = 1
     private var currentFile : File?= null
     private var currentFileOutputStream : FileOutputStream? = null
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     inner class LocalBinder : Binder() {
         fun getService(): ListeningService = this@ListeningService
@@ -58,6 +63,8 @@ class ListeningService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
         vad = VadSilero(
             applicationContext,
@@ -134,6 +141,9 @@ class ListeningService : Service() {
                 AppConfig.Audio.CHANNEL_CONFIG,
                 AppConfig.Audio.AUDIO_FORMAT
             )
+
+            val internalBufferSize = minBufferSize*10
+
             if (ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.RECORD_AUDIO
@@ -144,7 +154,7 @@ class ListeningService : Service() {
                     AppConfig.Audio.SAMPLE_RATE,
                     AppConfig.Audio.CHANNEL_CONFIG,
                     AppConfig.Audio.AUDIO_FORMAT,
-                    minBufferSize
+                    internalBufferSize
                 )
             }
         }
@@ -264,6 +274,8 @@ class ListeningService : Service() {
 
         currentFile = File("$recordingDir/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
 
+        saveLocationMetadata(recordingDir)
+
         val byteBuffer = ByteBuffer.allocate(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE*2)
             .order(ByteOrder.LITTLE_ENDIAN)
 
@@ -341,6 +353,25 @@ class ListeningService : Service() {
         System.arraycopy(ringBuffer,0,bufferContent,
             AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex,ringBufferInsertionIndex)
         return bufferContent
+    }
+
+    private fun saveLocationMetadata(directory: File) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        val metadataFile = File(directory, "metadata.json")
+                        val json = org.json.JSONObject()
+                        json.put("latitude", location.latitude)
+                        json.put("longitude", location.longitude)
+                        json.put("timestamp", System.currentTimeMillis())
+                        
+                        metadataFile.writeText(json.toString())
+                    }
+                }
+        }
     }
 
     override fun onDestroy() {
