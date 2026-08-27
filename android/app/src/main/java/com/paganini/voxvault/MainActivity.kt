@@ -34,8 +34,9 @@ class MainActivity : AppCompatActivity() {
 
     // region Properties
     private lateinit var viewModel: MainViewModel
+    private lateinit var settingsManager: SettingsManager
     private var currentService: ListeningService? = null
-    private val displayedRecordings = mutableSetOf<String>()
+    private val displayedRecordings = mutableMapOf<String, Recording>()
     // endregion
 
     // region Lifecycle
@@ -49,7 +50,9 @@ class MainActivity : AppCompatActivity() {
 
         // Service & ViewModel Setup
         viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+        settingsManager = SettingsManager(this)
         setupServiceObservation()
+        setupSettingsObservation()
 
         // Input Listeners
         setupClickListeners()
@@ -97,6 +100,52 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun setupSettingsObservation() {
+        lifecycleScope.launch {
+            settingsManager.backendUrlFlow.collect { url ->
+                AppConfig.Web.BACKEND_ADDRESS = url
+            }
+        }
+
+        lifecycleScope.launch {
+            var first = true
+            settingsManager.maxSilenceTimeFlow.collect { time ->
+                val changed = AppConfig.Audio.RECORDING_MAX_SILENCE != time
+                AppConfig.Audio.RECORDING_MAX_SILENCE = time
+                if (!first && changed) restartServiceIfListening()
+                first = false
+            }
+        }
+
+        lifecycleScope.launch {
+            var first = true
+            settingsManager.preBufferLengthFlow.collect { length ->
+                val changed = AppConfig.Audio.PRE_RECORDING_BUFFER_LENGTH_MS != length
+                AppConfig.Audio.PRE_RECORDING_BUFFER_LENGTH_MS = length
+                if (!first && changed) restartServiceIfListening()
+                first = false
+            }
+        }
+
+        lifecycleScope.launch {
+            var first = true
+            settingsManager.chunkLengthFlow.collect { length ->
+                val changed = AppConfig.Audio.RECORDING_CHUNK_SIZE_MS != length
+                AppConfig.Audio.RECORDING_CHUNK_SIZE_MS = length
+                if (!first && changed) restartServiceIfListening()
+                first = false
+            }
+        }
+    }
+
+    private fun restartServiceIfListening() {
+        val service = currentService ?: return
+        if (service.isListening) {
+            service.endListening()
+            service.startListening()
+        }
+    }
+
     fun setupRecordingFileReaderService(){
         lifecycleScope.launch {
             while (true) {
@@ -140,6 +189,10 @@ class MainActivity : AppCompatActivity() {
             currentService?.toggle()
         }
 
+        findViewById<View>(R.id.settingsButton).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
         val listeningSelectAllButton = findViewById<Button>(R.id.selectAll)
         listeningSelectAllButton.setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
@@ -160,9 +213,45 @@ class MainActivity : AppCompatActivity() {
                 child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
             }.toList()
 
+            if (toDelete.isEmpty()) return@setOnClickListener
+
+            val count = toDelete.size
+            var totalDuration = 0.0
             toDelete.forEach { child ->
-                deleteRecording(child)
+                val folderName = child.tag as? String
+                totalDuration += displayedRecordings[folderName]?.duration ?: 0.0
             }
+
+            val durationText = formatDuration(totalDuration)
+            
+            val message = if (count == 1) {
+                "Do you want to delete this recording with a length of $durationText?"
+            } else {
+                "Do you want to delete $count recordings with a total length of $durationText?"
+            }
+
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(if (count == 1) "Delete Recording" else "Delete Recordings")
+                .setMessage(message)
+                .setPositiveButton("Delete") { _, _ ->
+                    toDelete.forEach { child ->
+                        deleteRecording(child)
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+    }
+
+    private fun formatDuration(duration: Double): String {
+        val totalSeconds = duration.toLong()
+        val hours = totalSeconds / 3600
+        val mins = (totalSeconds % 3600) / 60
+        val secs = totalSeconds % 60
+        return if (hours > 0) {
+            String.format(java.util.Locale.getDefault(), "%d:%02d:%02d", hours, mins, secs)
+        } else {
+            String.format(java.util.Locale.getDefault(), "%02d:%02d", mins, secs)
         }
     }
 
@@ -220,8 +309,8 @@ class MainActivity : AppCompatActivity() {
     // region List Management
     fun addToScrollableList(recording: Recording) {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-        if (!displayedRecordings.contains(recording.name)) {
-            displayedRecordings.add(recording.name)
+        if (!displayedRecordings.containsKey(recording.name)) {
+            displayedRecordings[recording.name] = recording
             val view = recording.getView(this, parent)
             view.findViewById<CheckBox>(R.id.recordingCheckbox).setOnClickListener {
                 updateSelectAllButtonText()
