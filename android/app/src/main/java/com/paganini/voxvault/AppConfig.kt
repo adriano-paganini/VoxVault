@@ -7,13 +7,14 @@ import android.media.MediaRecorder
 import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.Mode
 import com.konovalov.vad.silero.config.SampleRate
+import androidx.core.graphics.toColorInt
 
 object AppConfig {
     object Audio {
         const val SAMPLE_RATE = 16000
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        const val AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_RECOGNITION
+        const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
         
         /**
          * CRITICAL: This must match [AppConfig.VAD.FRAME_SIZE] numeric value.
@@ -37,6 +38,8 @@ object AppConfig {
          * (16,000 * 5,000) / 1,000 = 80,000
          */
         const val PRE_RECORDING_BUFFER_SIZE = (SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000
+
+        const val RECORDING_CHUNK_SIZE_MS = 120000
     }
 
     object VAD {
@@ -48,11 +51,13 @@ object AppConfig {
     }
 
     object UI {
-        const val COLOR_SILENCE = Color.RED    // 0
-        const val COLOR_SPEECH = Color.GREEN   // 1
-        val COLOR_TRANSITION = Color.rgb(255, 165, 0) // 2: Orange
+        val COLOR_IDLE = "#444444".toColorInt() // Dark gray for better white text contrast
+        const val COLOR_SILENCE = Color.RED      // 0: Active but quiet
+        const val COLOR_SPEECH = Color.GREEN     // 1: Active and hearing voice
+        val COLOR_TRANSITION = Color.rgb(255, 165, 0) // 2: Active orange
 
-        fun getStateColor(state: Int): Int {
+        fun getStateColor(isListening: Boolean, state: Int): Int {
+            if (!isListening) return COLOR_IDLE
             return when (state) {
                 1 -> COLOR_SPEECH
                 2 -> COLOR_TRANSITION
@@ -66,11 +71,23 @@ object AppConfig {
     }
 
     object Permissions {
-        val REQUIRED = arrayOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.POST_NOTIFICATIONS
-        )
+        /**
+         * List of permissions that require a runtime popup.
+         * Automatically filters out [Manifest.permission.POST_NOTIFICATIONS] on devices below Android 13.
+         */
+        val REQUIRED: Array<String>
+            get() {
+                val list = mutableListOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                )
+                
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    list.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                
+                return list.toTypedArray()
+            }
     }
 }
