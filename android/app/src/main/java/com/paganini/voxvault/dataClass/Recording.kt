@@ -25,17 +25,31 @@ data class Recording(
         val inflater = LayoutInflater.from(context)
         val view = inflater.inflate(R.layout.item_recording, parent, false)
         
-        val timestampView = view.findViewById<TextView>(R.id.recordingTimestamp)
+        val dateView = view.findViewById<TextView>(R.id.recordingDate)
+        val timeView = view.findViewById<TextView>(R.id.recordingTime)
         val durationView = view.findViewById<TextView>(R.id.recordingDuration)
         
-        // Date and Time with Year, no Day Name
-        val sdf = SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.getDefault())
-        timestampView.text = sdf.format(Date(timestamp))
+        val date = Date(timestamp)
         
-        // Duration formatted as mm:ss
-        val minutes = (duration / 60).toInt()
-        val seconds = (duration % 60).toInt()
-        durationView.text = String.format(Locale.getDefault(), "%d min %d sec", minutes, seconds)
+        // Date: MMM dd, yyyy
+        val dateSdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+        dateView.text = dateSdf.format(date)
+        
+        // Time: HH:mm
+        val timeSdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+        timeView.text = timeSdf.format(date)
+        
+        // Duration: handles H:mm:ss or mm:ss
+        val totalSeconds = duration.toLong()
+        val hours = totalSeconds / 3600
+        val mins = (totalSeconds % 3600) / 60
+        val secs = totalSeconds % 60
+        
+        durationView.text = if (hours > 0) {
+            String.format(Locale.getDefault(), "%d:%02d:%02d", hours, mins, secs)
+        } else {
+            String.format(Locale.getDefault(), "%02d:%02d", mins, secs)
+        }
         
         return view
     }

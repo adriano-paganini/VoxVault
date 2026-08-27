@@ -8,18 +8,31 @@
     android:background="?android:attr/windowBackground"
     android:fitsSystemWindows="true">
 
-    <!-- Action Bar: Select All | Title | Upload -->
+    <!-- Page Title -->
+    <TextView
+        android:id="@+id/pageTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="24dp"
+        android:layout_marginTop="24dp"
+        android:text="@string/recordings_title"
+        android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
+        android:textStyle="bold"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- Action Bar: Select All | Spacer | Upload | Delete -->
     <LinearLayout
         android:id="@+id/controlBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="16dp"
+        android:layout_marginTop="12dp"
         android:background="@drawable/bar_background"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:padding="8dp"
-        app:layout_constraintTop_toTopOf="parent">
+        app:layout_constraintTop_toBottomOf="@id/pageTitle">
 
         <Button
             android:id="@+id/selectAll"

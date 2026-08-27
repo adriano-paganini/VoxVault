@@ -6,6 +6,4 @@
     <string name="upload">Upload</string>
     <string name="delete">Delete</string>
     <string name="recordings_title">Recordings</string>
-    <string name="bullet_separator">" • "</string>
-    <string name="location_preview">Location preview</string>
 </resources>
