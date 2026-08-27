@@ -7,6 +7,7 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Bundle
 import android.view.View
+import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
@@ -26,6 +27,7 @@ import com.paganini.voxvault.dataClass.Recording
 import com.paganini.voxvault.service.ListeningService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.time.Duration.Companion.seconds
 
 class MainActivity : AppCompatActivity() {
@@ -150,6 +152,18 @@ class MainActivity : AppCompatActivity() {
             }
             updateSelectAllButtonText()
         }
+
+        val listeningDeleteButton = findViewById<Button>(R.id.deleteButton)
+        listeningDeleteButton.setOnClickListener {
+            val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+            val toDelete = parent.children.filter { child ->
+                child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
+            }.toList()
+
+            toDelete.forEach { child ->
+                deleteRecording(child)
+            }
+        }
     }
 
     private fun updateSelectAllButtonText() {
@@ -214,6 +228,21 @@ class MainActivity : AppCompatActivity() {
             }
             parent.addView(view)
         }
+    }
+
+    fun deleteRecording(recordingView: View) {
+        // We use the 'tag' we set in Recording.getView to get the exact folder name
+        val folderName = recordingView.tag as? String ?: return
+        val recordingDir = File(filesDir, "recordings/$folderName")
+
+        if (recordingDir.exists()) {
+            recordingDir.deleteRecursively()
+        }
+
+        val parent = recordingView.parent as? ViewGroup
+        parent?.removeView(recordingView)
+        displayedRecordings.remove(folderName)
+        updateSelectAllButtonText()
     }
     // endregion
 }

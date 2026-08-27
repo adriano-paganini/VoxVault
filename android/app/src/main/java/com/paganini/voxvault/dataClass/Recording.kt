@@ -24,6 +24,7 @@ data class Recording(
     fun getView(context: Context, parent: ViewGroup? = null): View {
         val inflater = LayoutInflater.from(context)
         val view = inflater.inflate(R.layout.item_recording, parent, false)
+        view.tag = name
         
         val dateView = view.findViewById<TextView>(R.id.recordingDate)
         val timeView = view.findViewById<TextView>(R.id.recordingTime)
