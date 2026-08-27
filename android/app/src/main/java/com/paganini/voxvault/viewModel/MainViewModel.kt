@@ -10,11 +10,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import com.paganini.voxvault.service.ListeningService
+import com.paganini.voxvault.service.RecordingFileReaderService
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private val _listeningService = MutableLiveData<ListeningService?>()
     val listeningService: LiveData<ListeningService?> = _listeningService
+
+    var recordingFileReaderService = RecordingFileReaderService(application)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {

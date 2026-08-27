@@ -6,7 +6,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -15,12 +14,26 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.ContactsContract
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.konovalov.vad.silero.VadSilero
 import com.paganini.voxvault.AppConfig
 import com.paganini.voxvault.MainActivity
 import com.paganini.voxvault.R
+import com.paganini.voxvault.dataClass.Recording
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ListeningService : Service() {
 
@@ -36,9 +49,13 @@ class ListeningService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     private var ringBufferInsertionIndex = 0
-    private var ringBufferReadIndex = 0
     private var samplesInRingBuffer = 0
     private val ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+
+    private var chunkCounter = 1
+    private var currentFile : File?= null
+    private var currentFileOutputStream : FileOutputStream? = null
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     inner class LocalBinder : Binder() {
         fun getService(): ListeningService = this@ListeningService
@@ -49,6 +66,8 @@ class ListeningService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         
         vad = VadSilero(
             applicationContext,
@@ -59,14 +78,14 @@ class ListeningService : Service() {
             speechDurationMs = AppConfig.VAD.SPEECH_DURATION_MS
         )
 
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VoxVault:RecordingWakeLock")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val notification = buildNotification("Ready to listen")
         
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             startForeground(
                 AppConfig.UI.NOTIFICATION_ID,
                 notification,
@@ -88,7 +107,7 @@ class ListeningService : Service() {
                 description = descriptionText
             }
             val notificationManager: NotificationManager =
-                getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                getSystemService(NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
     }
@@ -125,6 +144,9 @@ class ListeningService : Service() {
                 AppConfig.Audio.CHANNEL_CONFIG,
                 AppConfig.Audio.AUDIO_FORMAT
             )
+
+            val internalBufferSize = minBufferSize*10
+
             if (ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.RECORD_AUDIO
@@ -135,7 +157,7 @@ class ListeningService : Service() {
                     AppConfig.Audio.SAMPLE_RATE,
                     AppConfig.Audio.CHANNEL_CONFIG,
                     AppConfig.Audio.AUDIO_FORMAT,
-                    minBufferSize
+                    internalBufferSize
                 )
             }
         }
@@ -156,8 +178,11 @@ class ListeningService : Service() {
         audioListener?.startRecording()
         wakeLock?.acquire(10 * 60 * 1000L /*10 minutes*/)
         
+        // Notify Activity to update color (it will now turn Red immediately)
+        speakingListener?.invoke()
+
         // Update notification
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(AppConfig.UI.NOTIFICATION_ID, buildNotification("Listening..."))
 
         listeningThread = Thread {
@@ -170,16 +195,24 @@ class ListeningService : Service() {
         val buffer = ShortArray(AppConfig.Audio.BUFFER_SIZE)
         var silenceDuration = 0
         var recordingState = 0
+        var recordingDuration = 0
         while (isListening) {
             val readResult = audioListener?.read(buffer, 0, AppConfig.Audio.BUFFER_SIZE)
             if (readResult != null && readResult > 0) {
                 if (recordingState == 0) ringBufferAppend(buffer)
+                else{
+                    writeToFile(buffer)
+                    recordingDuration+= AppConfig.Audio.MS_PER_FRAME
+                }
                 val isSpeech = vad?.isSpeech(buffer) ?: false
 
                 if (isSpeech) {
                     if (recordingState == 0) {
                         recordingState = 1
                         silenceDuration = 0
+
+                        writeRingBufferToFile()
+
                         sharedSpeaking = 1
                         speakingListener?.invoke()
                     } else if (recordingState == 2) {
@@ -199,12 +232,34 @@ class ListeningService : Service() {
                         speakingListener?.invoke()
                     }
                 }
+
+                if (recordingDuration >= AppConfig.Audio.RECORDING_CHUNK_SIZE_MS){
+                    val directory = currentFile?.parent
+                    currentFileOutputStream?.close()
+                    currentFileOutputStream = null
+                    chunkCounter++
+                    recordingDuration = 0
+
+                    currentFile = File("$directory/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
+                    currentFileOutputStream = FileOutputStream(currentFile)
+                }
+
                 if (silenceDuration >= AppConfig.Audio.RECORDING_MAX_SILENCE) {
+                    completeMetadata()
                     recordingState = 0
+                    silenceDuration = 0
+                    recordingDuration = 0
                     ringBufferInsertionIndex = 0
-                    ringBufferReadIndex = 0
                     samplesInRingBuffer = 0
                     ringBuffer.fill(0)
+                    chunkCounter = 1
+
+                    try {
+                        currentFileOutputStream?.flush()
+                        currentFileOutputStream?.close()
+                    } catch (_: Exception) { }
+                    currentFileOutputStream = null
+
                     sharedSpeaking = 0
                     speakingListener?.invoke()
                 }
@@ -212,17 +267,72 @@ class ListeningService : Service() {
         }
     }
 
+    fun writeRingBufferToFile(){
+        val timestamp = SimpleDateFormat(
+            "yyyy-MM-dd_HH-mm-ss",
+            Locale.US
+        ).format(Date())
+
+        val recordingDir = File(
+            applicationContext.filesDir,
+            "recordings/$timestamp"
+        )
+         recordingDir.mkdirs()
+
+        currentFile = File("$recordingDir/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
+
+        saveLocationMetadata(recordingDir)
+
+        val byteBuffer = ByteBuffer.allocate(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE*2)
+            .order(ByteOrder.LITTLE_ENDIAN)
+
+        val bufferedSamples = ringBufferGetAll()
+
+        byteBuffer.asShortBuffer().put(bufferedSamples)
+
+        currentFileOutputStream = FileOutputStream(currentFile)
+
+        currentFileOutputStream?.write(byteBuffer.array())
+    }
+
+    fun writeToFile(buffer: ShortArray){
+        val byteBuffer = ByteBuffer.allocate(AppConfig.Audio.BUFFER_SIZE*2).order(ByteOrder.LITTLE_ENDIAN)
+        byteBuffer.asShortBuffer().put(buffer)
+
+        currentFileOutputStream?.write(byteBuffer.array())
+    }
     fun endListening() {
         if (!isListening) return
+        completeMetadata()
         isListening = false
+
+        // 1. Stop hardware resources
         audioListener?.stop()
         audioListener?.release()
         audioListener = null
+
+        // 2. Safely close stream
+        try {
+            currentFileOutputStream?.flush()
+            currentFileOutputStream?.close()
+        } catch (_: Exception) { }
+        currentFileOutputStream = null
+
+        // 3. Reset internal logic
         samplesInRingBuffer = 0
+        ringBufferInsertionIndex = 0
+        chunkCounter = 1
+        currentFile = null
+        ringBuffer.fill(0)
+
+        // 4. Reset UI State
+        sharedSpeaking = 0
+        speakingListener?.invoke() // Notify Activity to update color (it will now turn Gray immediately)
+
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(AppConfig.UI.NOTIFICATION_ID, buildNotification("Ready to listen"))
     }
 
@@ -242,6 +352,67 @@ class ListeningService : Service() {
             samplesInRingBuffer + AppConfig.Audio.BUFFER_SIZE,
             AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
         )
+    }
+
+    fun ringBufferGetAll():ShortArray{
+        val bufferContent = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+        System.arraycopy(ringBuffer, ringBufferInsertionIndex, bufferContent,
+            0,AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex)
+        System.arraycopy(ringBuffer,0,bufferContent,
+            AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex,ringBufferInsertionIndex)
+        return bufferContent
+    }
+
+    private fun saveLocationMetadata(directory: File) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
+            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        val metadataFile = File(directory, "metadata.json")
+                        
+                        // Create initial Recording object with location data
+                        val recording = Recording(
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        
+                        // Encode to JSON string and write to file
+                        metadataFile.writeText(Json.encodeToString(recording))
+                    }
+                }
+        }
+    }
+
+    private fun completeMetadata() {
+        val path = currentFile?.parent ?: return
+        val metadataFile = File(path, "metadata.json")
+        if (!metadataFile.exists()) return
+
+        try {
+            // 1. Read and decode existing metadata
+            val recording = Json.decodeFromString<Recording>(metadataFile.readText())
+
+            // 2. Calculate duration and extract name
+            val totalBytes = File(path)
+                .listFiles { f -> f.name.startsWith("chunk") }
+                ?.sumOf { it.length() }
+                ?: 0L
+            
+            val durationSeconds = totalBytes.toDouble() / (AppConfig.Audio.SAMPLE_RATE * 2)
+            val folderName = File(path).name
+
+            // 3. Update fields
+            recording.duration = durationSeconds
+            recording.name = folderName
+
+            // 4. Encode and save back
+            metadataFile.writeText(Json.encodeToString(recording))
+        } catch (e: Exception) {
+            // Log or handle error
+        }
     }
 
     override fun onDestroy() {
