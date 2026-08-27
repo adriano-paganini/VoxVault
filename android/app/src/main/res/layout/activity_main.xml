@@ -11,12 +11,12 @@
 
 
     <ToggleButton
-        android:id="@+id/record_toggle"
+        android:id="@+id/listeningToggle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
 
-        android:textOn="@string/recording_on"
-        android:textOff="@string/recording_off"
+        android:textOn="@string/listening_on"
+        android:textOff="@string/listening_off"
 
         android:layout_marginStart="24dp"
         android:layout_marginTop="24dp"
@@ -30,8 +30,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
         android:orientation="horizontal"
-        app:layout_constraintStart_toStartOf="@+id/record_toggle"
-        app:layout_constraintTop_toBottomOf="@+id/record_toggle">
+        app:layout_constraintStart_toStartOf="@+id/listeningToggle"
+        app:layout_constraintTop_toBottomOf="@+id/listeningToggle">
 
         <CheckBox
             android:id="@+id/selectAll"
