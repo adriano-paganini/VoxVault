@@ -14,6 +14,7 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.provider.ContactsContract
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -23,6 +24,9 @@ import com.konovalov.vad.silero.VadSilero
 import com.paganini.voxvault.AppConfig
 import com.paganini.voxvault.MainActivity
 import com.paganini.voxvault.R
+import com.paganini.voxvault.dataClass.Recording
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
@@ -30,7 +34,6 @@ import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.min
 
 class ListeningService : Service() {
 
@@ -242,6 +245,7 @@ class ListeningService : Service() {
                 }
 
                 if (silenceDuration >= AppConfig.Audio.RECORDING_MAX_SILENCE) {
+                    completeMetadata()
                     recordingState = 0
                     silenceDuration = 0
                     recordingDuration = 0
@@ -299,6 +303,7 @@ class ListeningService : Service() {
     }
     fun endListening() {
         if (!isListening) return
+        completeMetadata()
         isListening = false
 
         // 1. Stop hardware resources
@@ -366,14 +371,47 @@ class ListeningService : Service() {
                 .addOnSuccessListener { location ->
                     if (location != null) {
                         val metadataFile = File(directory, "metadata.json")
-                        val json = org.json.JSONObject()
-                        json.put("latitude", location.latitude)
-                        json.put("longitude", location.longitude)
-                        json.put("timestamp", System.currentTimeMillis())
                         
-                        metadataFile.writeText(json.toString())
+                        // Create initial Recording object with location data
+                        val recording = Recording(
+                            latitude = location.latitude,
+                            longitude = location.longitude,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        
+                        // Encode to JSON string and write to file
+                        metadataFile.writeText(Json.encodeToString(recording))
                     }
                 }
+        }
+    }
+
+    private fun completeMetadata() {
+        val path = currentFile?.parent ?: return
+        val metadataFile = File(path, "metadata.json")
+        if (!metadataFile.exists()) return
+
+        try {
+            // 1. Read and decode existing metadata
+            val recording = Json.decodeFromString<Recording>(metadataFile.readText())
+
+            // 2. Calculate duration and extract name
+            val totalBytes = File(path)
+                .listFiles { f -> f.name.startsWith("chunk") }
+                ?.sumOf { it.length() }
+                ?: 0L
+            
+            val durationSeconds = totalBytes.toDouble() / (AppConfig.Audio.SAMPLE_RATE * 2)
+            val folderName = File(path).name
+
+            // 3. Update fields
+            recording.duration = durationSeconds
+            recording.name = folderName
+
+            // 4. Encode and save back
+            metadataFile.writeText(Json.encodeToString(recording))
+        } catch (e: Exception) {
+            // Log or handle error
         }
     }
 

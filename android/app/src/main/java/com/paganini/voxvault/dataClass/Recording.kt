@@ -1,21 +1,24 @@
 package com.paganini.voxvault.dataClass
 
-import android.location.Location
+import android.content.Context
+import android.view.View
 import android.widget.TextView
-import com.paganini.voxvault.AppConfig
-import com.paganini.voxvault.MainActivity
-import java.util.Date
+import kotlinx.serialization.InternalSerializationApi
+import kotlinx.serialization.Serializable
 
+@InternalSerializationApi @Serializable
 data class Recording(
-    val startDate: Date,
-    var endDate: Date,
-    var location: Location,
-    var title: String
+    var name: String = "",
+    var duration: Double = 0.0,
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val timestamp: Long = 0L,
 ){
-    fun textView(activity: MainActivity): TextView {
-        val text = TextView(activity)
-        text.text = this.title
-        text.setPadding(0, AppConfig.UI.LIST_ITEM_PADDING_TOP, 0, 0)
-        return text
+    fun getView(context: Context): View {
+        val textView =  TextView(context)
+        textView.text = String.format(java.util.Locale.US, "%.1fs - %s", duration, name)
+        return textView
     }
 }
+
+

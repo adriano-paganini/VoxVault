@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 android {
@@ -40,6 +41,7 @@ dependencies {
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.navigation.fragment.ktx)
+    implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.navigation.ui.ktx)
     implementation(libs.silero)
     implementation(libs.playServicesLocation)
