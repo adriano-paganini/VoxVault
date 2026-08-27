@@ -1,87 +1,118 @@
 package com.paganini.voxvault
 
-import android.location.Location
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.ToggleButton
-import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.ViewModelProvider
+import com.paganini.voxvault.viewModel.MainViewModel
 import com.paganini.voxvault.dataClass.Recording
-import com.paganini.voxvault.service.RecordingService
-import java.util.Date
+import com.paganini.voxvault.service.ListeningService
 
 class MainActivity : AppCompatActivity() {
 
-    val recordingService = RecordingService()
+    private val viewModel by lazy {
+        ViewModelProvider(this)[MainViewModel::class.java]
+    }
+
+    private var currentService: ListeningService? = null
+
+    private val requestMultiplePermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        val micGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+
+        if (!micGranted) {
+            finish()
+        } else {
+            startListeningService()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
         setContentView(R.layout.activity_main)
-        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)){ v, insets ->
+
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left,systemBars.top,systemBars.right,systemBars.bottom)
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
 
-        recordingService.onRecordingStart = {
-            addTestRecordings()
+        val listeningToggleButton = findViewById<ToggleButton>(R.id.listeningToggle)
+        val mainView = findViewById<View>(R.id.main)
+
+        viewModel.listeningService.observe(this) { service ->
+            currentService = service
+            if (service != null) {
+                // Sync UI with existing service state
+                listeningToggleButton.isChecked = service.isListening
+                mainView.setBackgroundColor(AppConfig.UI.getStateColor(service.sharedSpeaking))
+
+                service.speakingListener = {
+                    runOnUiThread {
+                        mainView.setBackgroundColor(AppConfig.UI.getStateColor(service.sharedSpeaking))
+                    }
+                }
+            }
         }
 
-        recordingService.onRecordingEnd = {
-            clearTestRecordings()
+        listeningToggleButton.setOnClickListener {
+            currentService?.toggle()
         }
 
-        val recordToggleButton = findViewById<ToggleButton>(R.id.record_toggle)
-        recordToggleButton.setOnClickListener{
-            recordingService.toggle()
-        }
-    }
-
-    fun clearTestRecordings(){
-        val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-        parent.removeAllViews()
-    }
-
-    fun addTestRecordings(){
-        val recordings = listOf(
-            Recording(Date(), Date(), Location("gps"), "Test1"),
-            Recording(Date(), Date(), Location("gps"), "Test2"),
-            Recording(Date(), Date(), Location("gps"), "Test3"),
-            Recording(Date(), Date(), Location("gps"), "Test4"),
-            Recording(Date(), Date(), Location("gps"), "Test5"),
-            Recording(Date(), Date(), Location("gps"), "Test6"),
-            Recording(Date(), Date(), Location("gps"), "Test7"),
-            Recording(Date(), Date(), Location("gps"), "Test1"),
-            Recording(Date(), Date(), Location("gps"), "Test2"),
-            Recording(Date(), Date(), Location("gps"), "Test3"),
-            Recording(Date(), Date(), Location("gps"), "Test4"),
-            Recording(Date(), Date(), Location("gps"), "Test5"),
-            Recording(Date(), Date(), Location("gps"), "Test6"),
-            Recording(Date(), Date(), Location("gps"), "Test7"),
-            Recording(Date(), Date(), Location("gps"), "Test1"),
-            Recording(Date(), Date(), Location("gps"), "Test2"),
-            Recording(Date(), Date(), Location("gps"), "Test3"),
-            Recording(Date(), Date(), Location("gps"), "Test4"),
-            Recording(Date(), Date(), Location("gps"), "Test5"),
-            Recording(Date(), Date(), Location("gps"), "Test6"),
-            Recording(Date(), Date(), Location("gps"), "Test7"),
-            Recording(Date(), Date(), Location("gps"), "Test8")
-        )
-
-        for (recording in recordings){
-            addToScrollableList(recording)
+        if (savedInstanceState == null) {
+            requestAppPermissions()
+        } else {
+            // If already granted, ensure service is running
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED) {
+                startListeningService()
+            }
         }
     }
 
-    fun addToScrollableList(recording: Recording){
+    private fun startListeningService() {
+        val intent = Intent(this, ListeningService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        viewModel.bindService()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        viewModel.unbindService()
+    }
+
+    private fun requestAppPermissions() {
+        val permissionsToRequest = AppConfig.Permissions.REQUIRED
+        val missing = permissionsToRequest.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missing.isNotEmpty()) {
+            requestMultiplePermissionsLauncher.launch(missing.toTypedArray())
+        } else {
+            startListeningService()
+        }
+    }
+
+    fun addToScrollableList(recording: Recording) {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
         parent.addView(recording.textView(this))
-
     }
-
 }
-
