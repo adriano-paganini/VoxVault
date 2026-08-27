@@ -3,6 +3,8 @@ package com.paganini.voxvault
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.widget.LinearLayout
@@ -58,11 +60,18 @@ class MainActivity : AppCompatActivity() {
             if (service != null) {
                 // Sync UI with existing service state
                 listeningToggleButton.isChecked = service.isListening
-                mainView.setBackgroundColor(AppConfig.UI.getStateColor(service.sharedSpeaking))
+                
+                val updateUI = {
+                    val color = AppConfig.UI.getStateColor(service.isListening, service.sharedSpeaking)
+                    mainView.setBackgroundColor(Color.TRANSPARENT) // Keep background neutral
+                    listeningToggleButton.backgroundTintList = ColorStateList.valueOf(color)
+                }
+
+                updateUI()
 
                 service.speakingListener = {
                     runOnUiThread {
-                        mainView.setBackgroundColor(AppConfig.UI.getStateColor(service.sharedSpeaking))
+                        updateUI()
                     }
                 }
             }

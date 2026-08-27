@@ -7,6 +7,7 @@ import android.media.MediaRecorder
 import com.konovalov.vad.silero.config.FrameSize
 import com.konovalov.vad.silero.config.Mode
 import com.konovalov.vad.silero.config.SampleRate
+import androidx.core.graphics.toColorInt
 
 object AppConfig {
     object Audio {
@@ -50,11 +51,13 @@ object AppConfig {
     }
 
     object UI {
-        const val COLOR_SILENCE = Color.RED    // 0
-        const val COLOR_SPEECH = Color.GREEN   // 1
-        val COLOR_TRANSITION = Color.rgb(255, 165, 0) // 2: Orange
+        val COLOR_IDLE = "#444444".toColorInt() // Dark gray for better white text contrast
+        const val COLOR_SILENCE = Color.RED      // 0: Active but quiet
+        const val COLOR_SPEECH = Color.GREEN     // 1: Active and hearing voice
+        val COLOR_TRANSITION = Color.rgb(255, 165, 0) // 2: Active orange
 
-        fun getStateColor(state: Int): Int {
+        fun getStateColor(isListening: Boolean, state: Int): Int {
+            if (!isListening) return COLOR_IDLE
             return when (state) {
                 1 -> COLOR_SPEECH
                 2 -> COLOR_TRANSITION

@@ -175,6 +175,9 @@ class ListeningService : Service() {
         audioListener?.startRecording()
         wakeLock?.acquire(10 * 60 * 1000L /*10 minutes*/)
         
+        // Notify Activity to update color (it will now turn Red immediately)
+        speakingListener?.invoke()
+
         // Update notification
         val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(AppConfig.UI.NOTIFICATION_ID, buildNotification("Listening..."))
@@ -319,7 +322,7 @@ class ListeningService : Service() {
 
         // 4. Reset UI State
         sharedSpeaking = 0
-        speakingListener?.invoke()
+        speakingListener?.invoke() // Notify Activity to update color (it will now turn Gray immediately)
 
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
