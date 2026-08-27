@@ -92,16 +92,4 @@ object AppConfig {
     object Web{
         var BACKEND_ADDRESS = "lab.elk-iwato.ts.net"
     }
-
-    fun updateFromSettings(
-        backendUrl: String,
-        maxSilence: Long,
-        preBuffer: Long,
-        chunkSize: Long
-    ) {
-        Web.BACKEND_ADDRESS = backendUrl
-        Audio.RECORDING_MAX_SILENCE = maxSilence
-        Audio.PRE_RECORDING_BUFFER_LENGTH_MS = preBuffer
-        Audio.RECORDING_CHUNK_SIZE_MS = chunkSize
-    }
 }
