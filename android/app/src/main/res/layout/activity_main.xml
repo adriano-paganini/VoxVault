@@ -29,14 +29,10 @@
             android:text="@string/select_all"
             android:textSize="12sp" />
 
-        <TextView
+        <View
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:text="@string/recordings_title"
-            android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-            android:textStyle="bold" />
+            android:layout_height="0dp"
+            android:layout_weight="1" />
 
         <Button
             android:id="@+id/uploadButton"
@@ -44,6 +40,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/upload"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/deleteButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/delete"
+            android:textColor="?attr/colorError"
             android:textSize="12sp" />
     </LinearLayout>
 

@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
         if (!displayedRecordings.contains(recording.name)){
             displayedRecordings.add(recording.name)
-            parent.addView(recording.getView(this))
+            parent.addView(recording.getView(this, parent))
         }
     }
     // endregion
