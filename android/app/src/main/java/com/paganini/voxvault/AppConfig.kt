@@ -46,8 +46,8 @@ object AppConfig {
         val SAMPLE_RATE = SampleRate.SAMPLE_RATE_16K
         val FRAME_SIZE = FrameSize.FRAME_SIZE_1536
         val MODE = Mode.NORMAL
-        const val SILENCE_DURATION_MS = 500
-        const val SPEECH_DURATION_MS = 100
+        const val SILENCE_DURATION_MS = 96
+        const val SPEECH_DURATION_MS = 96
     }
 
     object UI {
@@ -65,7 +65,6 @@ object AppConfig {
             }
         }
 
-        const val LIST_ITEM_PADDING_TOP = 100
         const val NOTIFICATION_CHANNEL_ID = "voxvault_listening_channel"
         const val NOTIFICATION_ID = 1001
     }
@@ -78,9 +77,7 @@ object AppConfig {
         val REQUIRED: Array<String>
             get() {
                 val list = mutableListOf(
-                    Manifest.permission.RECORD_AUDIO,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_FINE_LOCATION
+                    Manifest.permission.RECORD_AUDIO
                 )
                 
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
