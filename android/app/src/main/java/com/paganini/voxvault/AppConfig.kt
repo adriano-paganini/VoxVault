@@ -13,7 +13,7 @@ object AppConfig {
         const val SAMPLE_RATE = 16000
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        const val AUDIO_SOURCE = MediaRecorder.AudioSource.VOICE_RECOGNITION
+        const val AUDIO_SOURCE = MediaRecorder.AudioSource.MIC
         
         /**
          * CRITICAL: This must match [AppConfig.VAD.FRAME_SIZE] numeric value.
