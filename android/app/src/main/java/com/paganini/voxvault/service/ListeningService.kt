@@ -46,7 +46,7 @@ class ListeningService : Service() {
 
     private var ringBufferInsertionIndex = 0
     private var samplesInRingBuffer = 0
-    private val ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+    private var ringBuffer = ShortArray(0)
 
     private var chunkCounter = 1
     private var currentFile : File?= null
@@ -168,6 +168,12 @@ class ListeningService : Service() {
         }
 
         isListening = true
+        
+        // Re-initialize ring buffer with potentially new size
+        ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+        samplesInRingBuffer = 0
+        ringBufferInsertionIndex = 0
+        
         audioListener?.startRecording()
         wakeLock?.acquire(10 * 60 * 1000L /*10 minutes*/)
         
@@ -276,7 +282,8 @@ class ListeningService : Service() {
 
         saveInitialMetadata(recordingDir)
 
-        val byteBuffer = ByteBuffer.allocate(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE*2)
+        val bufferSize = ringBuffer.size
+        val byteBuffer = ByteBuffer.allocate(bufferSize*2)
             .order(ByteOrder.LITTLE_ENDIAN)
 
         val bufferedSamples = ringBufferGetAll()
@@ -330,7 +337,14 @@ class ListeningService : Service() {
     }
 
     fun ringBufferAppend(data: ShortArray) {
-        val remainingSpace = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE - ringBufferInsertionIndex
+        val bufferSize = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+        if (ringBuffer.size != bufferSize) {
+            ringBuffer = ShortArray(bufferSize)
+            ringBufferInsertionIndex = 0
+            samplesInRingBuffer = 0
+        }
+        
+        val remainingSpace = bufferSize - ringBufferInsertionIndex
 
         if (remainingSpace >= AppConfig.Audio.BUFFER_SIZE) {
             System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, AppConfig.Audio.BUFFER_SIZE)
@@ -339,20 +353,21 @@ class ListeningService : Service() {
             System.arraycopy(data, remainingSpace, ringBuffer, 0, AppConfig.Audio.BUFFER_SIZE - remainingSpace)
         }
 
-        ringBufferInsertionIndex = (ringBufferInsertionIndex + AppConfig.Audio.BUFFER_SIZE) % AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+        ringBufferInsertionIndex = (ringBufferInsertionIndex + AppConfig.Audio.BUFFER_SIZE) % bufferSize
 
         samplesInRingBuffer = minOf(
             samplesInRingBuffer + AppConfig.Audio.BUFFER_SIZE,
-            AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+            bufferSize
         )
     }
 
     fun ringBufferGetAll():ShortArray{
-        val bufferContent = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+        val bufferSize = ringBuffer.size
+        val bufferContent = ShortArray(bufferSize)
         System.arraycopy(ringBuffer, ringBufferInsertionIndex, bufferContent,
-            0,AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex)
+            0,bufferSize-ringBufferInsertionIndex)
         System.arraycopy(ringBuffer,0,bufferContent,
-            AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex,ringBufferInsertionIndex)
+            bufferSize-ringBufferInsertionIndex,ringBufferInsertionIndex)
         return bufferContent
     }
 

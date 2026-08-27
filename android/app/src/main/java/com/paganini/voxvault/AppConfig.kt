@@ -29,17 +29,18 @@ object AppConfig {
         /**
          * Duration of silence to stop a recording in milliseconds
          */
-        const val RECORDING_MAX_SILENCE = 20000
+        var RECORDING_MAX_SILENCE = 20000L
 
-        const val PRE_RECORDING_BUFFER_LENGTH_MS = 5000
+        var PRE_RECORDING_BUFFER_LENGTH_MS = 5000L
 
         /**
          * Number of samples required to store [PRE_RECORDING_BUFFER_LENGTH_MS] of audio.
          * (16,000 * 5,000) / 1,000 = 80,000
          */
-        const val PRE_RECORDING_BUFFER_SIZE = (SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000
+        val PRE_RECORDING_BUFFER_SIZE: Int
+            get() = ((SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000).toInt()
 
-        const val RECORDING_CHUNK_SIZE_MS = 120000
+        var RECORDING_CHUNK_SIZE_MS = 120000L
     }
 
     object VAD {
@@ -86,5 +87,9 @@ object AppConfig {
                 
                 return list.toTypedArray()
             }
+    }
+
+    object Web{
+        var BACKEND_ADDRESS = "lab.elk-iwato.ts.net"
     }
 }
