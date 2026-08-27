@@ -37,6 +37,8 @@ object AppConfig {
          * (16,000 * 5,000) / 1,000 = 80,000
          */
         const val PRE_RECORDING_BUFFER_SIZE = (SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000
+
+        const val RECORDING_CHUNK_SIZE_MS = 120000
     }
 
     object VAD {
@@ -66,11 +68,23 @@ object AppConfig {
     }
 
     object Permissions {
-        val REQUIRED = arrayOf(
-            Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.POST_NOTIFICATIONS
-        )
+        /**
+         * List of permissions that require a runtime popup.
+         * Automatically filters out [Manifest.permission.POST_NOTIFICATIONS] on devices below Android 13.
+         */
+        val REQUIRED: Array<String>
+            get() {
+                val list = mutableListOf(
+                    Manifest.permission.RECORD_AUDIO,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                )
+                
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    list.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                
+                return list.toTypedArray()
+            }
     }
 }
