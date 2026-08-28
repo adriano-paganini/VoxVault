@@ -11,6 +11,5 @@
     <string name="backend_url">Backend URL</string>
     <string name="max_silence">Max Silence (seconds)</string>
     <string name="pre_buffer">Pre-buffer Length (seconds)</string>
-    <string name="chunk_length">Chunk Length (seconds)</string>
     <string name="save">Save</string>
 </resources>

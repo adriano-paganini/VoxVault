@@ -126,16 +126,6 @@ class MainActivity : AppCompatActivity() {
                 first = false
             }
         }
-
-        lifecycleScope.launch {
-            var first = true
-            settingsManager.chunkLengthFlow.collect { length ->
-                val changed = AppConfig.Audio.RECORDING_CHUNK_SIZE_MS != length
-                AppConfig.Audio.RECORDING_CHUNK_SIZE_MS = length
-                if (!first && changed) restartServiceIfListening()
-                first = false
-            }
-        }
     }
 
     private fun restartServiceIfListening() {
