@@ -47,8 +47,8 @@ object AppConfig {
         val SAMPLE_RATE = SampleRate.SAMPLE_RATE_16K
         val FRAME_SIZE = FrameSize.FRAME_SIZE_1536
         val MODE = Mode.NORMAL
-        const val SILENCE_DURATION_MS = 96
-        const val SPEECH_DURATION_MS = 96
+        const val SILENCE_DURATION_MS = 500
+        const val SPEECH_DURATION_MS = 250
     }
 
     object UI {
