@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
+import android.widget.Toast
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,8 +26,10 @@ import androidx.lifecycle.lifecycleScope
 import com.paganini.voxvault.viewModel.MainViewModel
 import com.paganini.voxvault.dataClass.Recording
 import com.paganini.voxvault.service.ListeningService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
 
@@ -174,8 +177,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupClickListeners() {
-        val listeningToggleButton = findViewById<ToggleButton>(R.id.listeningToggle)
-        listeningToggleButton.setOnClickListener {
+        findViewById<ToggleButton>(R.id.listeningToggle).setOnClickListener {
             currentService?.toggle()
         }
 
@@ -183,8 +185,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        val listeningSelectAllButton = findViewById<Button>(R.id.selectAll)
-        listeningSelectAllButton.setOnClickListener {
+        findViewById<Button>(R.id.selectAll).setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
             val anyUnchecked = parent.children.any { child ->
                 !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
@@ -196,8 +197,7 @@ class MainActivity : AppCompatActivity() {
             updateSelectAllButtonText()
         }
 
-        val listeningDeleteButton = findViewById<Button>(R.id.deleteButton)
-        listeningDeleteButton.setOnClickListener {
+        findViewById<Button>(R.id.deleteButton).setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
             val toDelete = parent.children.filter { child ->
                 child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
@@ -230,6 +230,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
+        }
+
+        findViewById<Button>(R.id.uploadButton).setOnClickListener {
+            lifecycleScope.launch(Dispatchers.IO) {
+                val result = viewModel.httpCommunicationService.sendPing()
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
