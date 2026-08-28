@@ -22,8 +22,8 @@ class SettingsManager(private val context: Context) {
 
         // Default values corresponding to AppConfig
         const val DEFAULT_BACKEND_URL = "lab.elk-iwato.ts.net"
-        const val DEFAULT_MAX_SILENCE_TIME = 20000L
-        const val DEFAULT_PRE_BUFFER_LENGTH = 5000L
+        const val DEFAULT_MAX_SILENCE_TIME = 10000L
+        const val DEFAULT_PRE_BUFFER_LENGTH = 1000L
         const val DEFAULT_CHUNK_LENGTH = 120000L
     }
 
