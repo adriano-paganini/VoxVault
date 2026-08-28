@@ -29,9 +29,9 @@ object AppConfig {
         /**
          * Duration of silence to stop a recording in milliseconds
          */
-        var RECORDING_MAX_SILENCE = 20000L
+        var RECORDING_MAX_SILENCE = SettingsManager.DEFAULT_MAX_SILENCE_TIME
 
-        var PRE_RECORDING_BUFFER_LENGTH_MS = 5000L
+        var PRE_RECORDING_BUFFER_LENGTH_MS = SettingsManager.DEFAULT_PRE_BUFFER_LENGTH
 
         /**
          * Number of samples required to store [PRE_RECORDING_BUFFER_LENGTH_MS] of audio.
@@ -40,7 +40,7 @@ object AppConfig {
         val PRE_RECORDING_BUFFER_SIZE: Int
             get() = ((SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000).toInt()
 
-        var RECORDING_CHUNK_SIZE_MS = 120000L
+        const val RECORDING_CHUNK_SIZE_MS = 120000L
     }
 
     object VAD {
@@ -90,6 +90,6 @@ object AppConfig {
     }
 
     object Web{
-        var BACKEND_ADDRESS = "lab.elk-iwato.ts.net"
+        var BACKEND_ADDRESS = SettingsManager.DEFAULT_BACKEND_URL
     }
 }

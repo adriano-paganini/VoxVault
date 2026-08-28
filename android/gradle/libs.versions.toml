@@ -12,6 +12,7 @@ constraintlayout = "2.1.4"
 activityKtx = "1.8.0"
 navigationFragmentKtx = "2.6.0"
 navigationUiKtx = "2.6.0"
+okhttp = "5.5.0"
 silero = "2.0.10"
 playServicesLocation = "21.0.1"
 datastore = "1.1.1"
@@ -28,6 +29,7 @@ androidx-constraintlayout = { group = "androidx.constraintlayout", name = "const
 androidx-activity-ktx = { group = "androidx.activity", name = "activity-ktx", version.ref = "activityKtx" }
 androidx-navigation-fragment-ktx = { group = "androidx.navigation", name = "navigation-fragment-ktx", version.ref = "navigationFragmentKtx" }
 androidx-navigation-ui-ktx = { group = "androidx.navigation", name = "navigation-ui-ktx", version.ref = "navigationUiKtx" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 silero = { module = "com.github.gkonovalov.android-vad:silero", version.ref = "silero" }
 playServicesLocation = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }

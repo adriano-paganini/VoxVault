@@ -22,11 +22,9 @@ class SettingsActivity : AppCompatActivity() {
         val backendUrlEdit = findViewById<TextInputEditText>(R.id.backendUrlEdit)
         val maxSilenceEdit = findViewById<TextInputEditText>(R.id.maxSilenceEdit)
         val preBufferEdit = findViewById<TextInputEditText>(R.id.preBufferEdit)
-        val chunkLengthEdit = findViewById<TextInputEditText>(R.id.chunkLengthEdit)
         
         val maxSilenceLayout = findViewById<TextInputLayout>(R.id.maxSilenceLayout)
         val preBufferLayout = findViewById<TextInputLayout>(R.id.preBufferLayout)
-        val chunkLengthLayout = findViewById<TextInputLayout>(R.id.chunkLengthLayout)
         
         val saveButton = findViewById<Button>(R.id.saveButton)
 
@@ -34,7 +32,6 @@ class SettingsActivity : AppCompatActivity() {
             backendUrlEdit.setText(settingsManager.backendUrlFlow.first())
             maxSilenceEdit.setText((settingsManager.maxSilenceTimeFlow.first() / 1000.0).toString())
             preBufferEdit.setText((settingsManager.preBufferLengthFlow.first() / 1000.0).toString())
-            chunkLengthEdit.setText((settingsManager.chunkLengthFlow.first() / 1000.0).toString())
         }
 
         saveButton.setOnClickListener {
@@ -42,7 +39,6 @@ class SettingsActivity : AppCompatActivity() {
             
             val maxSilenceSec = maxSilenceEdit.text.toString().toDoubleOrNull() ?: 0.0
             val preBufferSec = preBufferEdit.text.toString().toDoubleOrNull() ?: 0.0
-            val chunkLengthSec = chunkLengthEdit.text.toString().toDoubleOrNull() ?: 0.0
 
             var isValid = true
 
@@ -66,23 +62,12 @@ class SettingsActivity : AppCompatActivity() {
                 preBufferLayout.error = null
             }
 
-            if (chunkLengthSec < 30.0) {
-                chunkLengthLayout.error = "Must be at least 30 seconds"
-                isValid = false
-            } else if (chunkLengthSec > 86400.0) {
-                chunkLengthLayout.error = "Cannot exceed 24 hours"
-                isValid = false
-            } else {
-                chunkLengthLayout.error = null
-            }
-
             if (!isValid) return@setOnClickListener
 
             lifecycleScope.launch {
                 settingsManager.updateBackendUrl(backendUrl)
                 settingsManager.updateMaxSilenceTime((maxSilenceSec * 1000).toLong())
                 settingsManager.updatePreBufferLength((preBufferSec * 1000).toLong())
-                settingsManager.updateChunkLength((chunkLengthSec * 1000).toLong())
                 finish()
             }
         }
