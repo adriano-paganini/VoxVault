@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VoxVault Key Setup</title>
+    <link rel="stylesheet" href="/static/style.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">VoxVault</p>
+        <h1>Key Setup</h1>
+      </header>
+
+      <section id="loading-view" class="panel">
+        <h2>Loading</h2>
+        <p>Checking key status...</p>
+      </section>
+
+      <section id="setup-view" class="panel hidden">
+        <h2>Create Server Keys</h2>
+        <p>No server keys were found. Create them once, store the private key securely, then copy the public key into your app.</p>
+        <button id="create-keys-button" type="button">Create Keys</button>
+      </section>
+
+      <section id="warning-view" class="panel warning hidden">
+        <h2>Private Key Warning</h2>
+        <p>Your private key must stay absolutely private. It has already been stored at <code id="private-key-path-warning"></code>.</p>
+        <p>Secure the key file on the server with:</p>
+        <div class="copy-box">
+          <button class="copy-button" data-copy-target="permission-commands" type="button" title="Copy commands">Copy</button>
+          <pre id="permission-commands"></pre>
+        </div>
+        <div class="actions">
+          <button id="reveal-created-keys-button" type="button">I understand, show the keys</button>
+        </div>
+      </section>
+
+      <section id="created-keys-view" class="hidden">
+        <div class="view-heading">
+          <div>
+            <h2>Generated Keys</h2>
+            <p>Copy the public key into your app. Keep the private key offline and private.</p>
+          </div>
+          <button id="hide-created-keys-button" class="secondary" type="button">Hide Keys</button>
+        </div>
+
+        <div class="key-grid">
+          <article class="panel key-card private-card">
+            <h3>Private Key</h3>
+            <div class="copy-box">
+              <button class="copy-button" data-copy-target="private-key-output" type="button" title="Copy private key">Copy</button>
+              <pre id="private-key-output" class="key-output"></pre>
+            </div>
+            <div id="private-key-qr" class="qr"></div>
+          </article>
+
+          <article class="panel key-card">
+            <h3>Public Key</h3>
+            <div class="copy-box">
+              <button class="copy-button" data-copy-target="created-public-key-output" type="button" title="Copy public key">Copy</button>
+              <pre id="created-public-key-output" class="key-output"></pre>
+            </div>
+            <div id="created-public-key-qr" class="qr"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="public-key-view" class="hidden">
+        <div id="public-key-summary" class="panel">
+          <h2>Public Key</h2>
+          <p>Server keys already exist. The private key will not be displayed again.</p>
+          <button id="display-public-key-button" type="button">Display Public Key</button>
+        </div>
+
+        <article id="public-key-card" class="panel key-card hidden">
+          <div class="view-heading compact">
+            <div>
+              <h2>Public Key</h2>
+              <p>Copy this key into your app.</p>
+            </div>
+            <button id="hide-public-key-button" class="secondary" type="button">Hide Public Key</button>
+          </div>
+          <div class="copy-box">
+            <button class="copy-button" data-copy-target="public-key-output" type="button" title="Copy public key">Copy</button>
+            <pre id="public-key-output" class="key-output"></pre>
+          </div>
+          <div id="public-key-qr" class="qr"></div>
+        </article>
+      </section>
+
+      <section id="error-view" class="panel error hidden">
+        <h2>Error</h2>
+        <pre id="error-output"></pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

@@ -17,6 +17,8 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 COPY main.py .
+COPY encryption.py .
+COPY static ./static
 
 EXPOSE 8000
 

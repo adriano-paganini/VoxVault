@@ -4,6 +4,9 @@ services:
     image: voxvault-server:latest
     ports:
       - "8000:8000"
+    environment:
+      VOXVAULT_PRIVATE_KEY_PATH: /data/server-privatekey.key
+      VOXVAULT_PRIVATE_KEY_HOST_PATH: /etc/voxvault/server-privatekey.key
     volumes:
-      - ${VOXVAULT_PRIVATE_KEY_HOST:-/etc/voxvault/server-privatekey.key}:/run/secrets/voxvault-private-key:ro
-      - ${VOXVAULT_PUBLIC_KEY_HOST:-/etc/voxvault/server-publickey.key}:/run/secrets/voxvault-public-key:ro
+      # Mount the host key directory. The app creates server-privatekey.key inside it.
+      - ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}:/data

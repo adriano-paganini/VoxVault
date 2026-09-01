@@ -63,7 +63,6 @@ class HttpCommunicationService(private val context: Context) {
             "Failure: ${e.message}"
         }
     }
-
     private fun getUrl(endpoint: String = "ping"): String {
         var baseUrl = AppConfig.Web.BACKEND_ADDRESS
         if (!baseUrl.startsWith("http")) {
