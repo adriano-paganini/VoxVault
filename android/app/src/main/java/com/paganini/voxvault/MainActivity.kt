@@ -10,7 +10,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import android.widget.Toast
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
@@ -30,8 +33,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.w3c.dom.Text
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
+import androidx.core.view.isVisible
 
 class MainActivity : AppCompatActivity() {
 
@@ -187,11 +192,16 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.selectAll).setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-            val anyUnchecked = parent.children.any { child ->
+            val selectableChildren = parent.children.filter { child ->
+                val recording = child.tag as? Recording
+                recording?.isUploaded == false
+            }
+
+            val anyUnchecked = selectableChildren.any { child ->
                 !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
             }
 
-            parent.children.forEach { child ->
+            selectableChildren.forEach { child ->
                 child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = anyUnchecked
             }
             updateSelectAllButtonText()
@@ -208,7 +218,7 @@ class MainActivity : AppCompatActivity() {
             val count = toDelete.size
             var totalDuration = 0.0
             toDelete.forEach { child ->
-                val folderName = child.tag as? String
+                val folderName = (child.tag as? Recording)?.name
                 totalDuration += displayedRecordings[folderName]?.duration ?: 0.0
             }
 
@@ -234,9 +244,50 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.uploadButton).setOnClickListener {
             lifecycleScope.launch(Dispatchers.IO) {
-                val result = viewModel.httpCommunicationService.sendPing()
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
+                val selectedRecordingViews = findViewById<LinearLayout>(R.id.recordingLinearLayout).children.filter {
+                    val checkbox = it.findViewById<CheckBox>(R.id.recordingCheckbox)
+                    checkbox.isVisible && checkbox.isChecked
+                }.toList()
+
+                for (recView in selectedRecordingViews) {
+                    val recording: Recording = recView.tag as Recording
+
+                    withContext(Dispatchers.Main) {
+                        recView.findViewById<CheckBox>(R.id.recordingCheckbox).visibility = View.GONE
+                        recView.findViewById<ProgressBar>(R.id.uploadLoadingIndicator).visibility = View.VISIBLE
+                        recView.findViewById<View>(R.id.uploadProgressBar).layoutParams.width = 0
+                        recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
+                    }
+
+                    val result = viewModel.httpCommunicationService.sendRecording(recording) { current, total ->
+                        lifecycleScope.launch(Dispatchers.Main) {
+                            val progress = current.toFloat() / total
+                            val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
+                            progressBar.layoutParams.width = (recView.width * progress).toInt()
+                            progressBar.requestLayout()
+                        }
+                    }
+
+                    withContext(Dispatchers.Main) {
+                        recView.findViewById<ProgressBar>(R.id.uploadLoadingIndicator).visibility = View.GONE
+                        if (result.startsWith("Failure") || result.startsWith("Error")) {
+                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).visibility = View.VISIBLE
+                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = false
+                            recView.findViewById<View>(R.id.uploadProgressBar).layoutParams.width = 0
+                            recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
+                        } else {
+                            recording.isUploaded = true
+                            recording.save(filesDir)
+                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = false
+                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).visibility = View.GONE
+                            // Ensure full green at the end
+                            val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
+                            progressBar.layoutParams.width = recView.width
+                            progressBar.requestLayout()
+                        }
+                        Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
+                        updateSelectAllButtonText()
+                    }
                 }
             }
         }
@@ -258,11 +309,16 @@ class MainActivity : AppCompatActivity() {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
         val selectAllButton = findViewById<Button>(R.id.selectAll)
 
-        val anyUnchecked = parent.children.any { child ->
+        val selectableChildren = parent.children.filter { child ->
+            val recording = child.tag as? Recording
+            recording?.isUploaded == false
+        }
+
+        val anyUnchecked = selectableChildren.any { child ->
             !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
         }
 
-        if (anyUnchecked || parent.isEmpty()) {
+        if (anyUnchecked || selectableChildren.none()) {
             selectAllButton.setText(R.string.select_all)
         } else {
             selectAllButton.setText(R.string.deselect_all)
@@ -320,7 +376,7 @@ class MainActivity : AppCompatActivity() {
 
     fun deleteRecording(recordingView: View) {
         // We use the 'tag' we set in Recording.getView to get the exact folder name
-        val folderName = recordingView.tag as? String ?: return
+        val folderName = (recordingView.tag as? Recording)?.name
         val recordingDir = File(filesDir, "recordings/$folderName")
 
         if (recordingDir.exists()) {
