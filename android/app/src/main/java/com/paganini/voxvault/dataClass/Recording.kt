@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import com.paganini.voxvault.Chunker
 import com.paganini.voxvault.R
 import kotlinx.serialization.InternalSerializationApi
 import kotlinx.serialization.Serializable
@@ -17,14 +18,17 @@ import java.util.Locale
 data class Recording(
     var name: String = "",
     var duration: Double = 0.0,
-    val latitude: Double = 0.0,
-    val longitude: Double = 0.0,
     val timestamp: Long = 0L,
 ) {
+
+    fun getChunker(filesDir: java.io.File): Chunker {
+        return Chunker(this, filesDir)
+    }
     fun getView(context: Context, parent: ViewGroup? = null): View {
         val inflater = LayoutInflater.from(context)
         val view = inflater.inflate(R.layout.item_recording, parent, false)
-        view.tag = name
+        view.tag = this
+
         
         val dateView = view.findViewById<TextView>(R.id.recordingDate)
         val timeView = view.findViewById<TextView>(R.id.recordingTime)

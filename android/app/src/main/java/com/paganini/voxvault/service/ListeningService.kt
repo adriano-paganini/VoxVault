@@ -14,12 +14,8 @@ import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.provider.ContactsContract
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import com.konovalov.vad.silero.VadSilero
 import com.paganini.voxvault.AppConfig
 import com.paganini.voxvault.MainActivity
@@ -50,12 +46,11 @@ class ListeningService : Service() {
 
     private var ringBufferInsertionIndex = 0
     private var samplesInRingBuffer = 0
-    private val ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+    private var ringBuffer = ShortArray(0)
 
     private var chunkCounter = 1
     private var currentFile : File?= null
     private var currentFileOutputStream : FileOutputStream? = null
-    private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     inner class LocalBinder : Binder() {
         fun getService(): ListeningService = this@ListeningService
@@ -67,8 +62,6 @@ class ListeningService : Service() {
         super.onCreate()
         createNotificationChannel()
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        
         vad = VadSilero(
             applicationContext,
             sampleRate = AppConfig.VAD.SAMPLE_RATE,
@@ -175,6 +168,12 @@ class ListeningService : Service() {
         }
 
         isListening = true
+        
+        // Re-initialize ring buffer with potentially new size
+        ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+        samplesInRingBuffer = 0
+        ringBufferInsertionIndex = 0
+        
         audioListener?.startRecording()
         wakeLock?.acquire(10 * 60 * 1000L /*10 minutes*/)
         
@@ -281,9 +280,10 @@ class ListeningService : Service() {
 
         currentFile = File("$recordingDir/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
 
-        saveLocationMetadata(recordingDir)
+        saveInitialMetadata(recordingDir)
 
-        val byteBuffer = ByteBuffer.allocate(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE*2)
+        val bufferSize = ringBuffer.size
+        val byteBuffer = ByteBuffer.allocate(bufferSize*2)
             .order(ByteOrder.LITTLE_ENDIAN)
 
         val bufferedSamples = ringBufferGetAll()
@@ -337,7 +337,14 @@ class ListeningService : Service() {
     }
 
     fun ringBufferAppend(data: ShortArray) {
-        val remainingSpace = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE - ringBufferInsertionIndex
+        val bufferSize = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+        if (ringBuffer.size != bufferSize) {
+            ringBuffer = ShortArray(bufferSize)
+            ringBufferInsertionIndex = 0
+            samplesInRingBuffer = 0
+        }
+        
+        val remainingSpace = bufferSize - ringBufferInsertionIndex
 
         if (remainingSpace >= AppConfig.Audio.BUFFER_SIZE) {
             System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, AppConfig.Audio.BUFFER_SIZE)
@@ -346,44 +353,30 @@ class ListeningService : Service() {
             System.arraycopy(data, remainingSpace, ringBuffer, 0, AppConfig.Audio.BUFFER_SIZE - remainingSpace)
         }
 
-        ringBufferInsertionIndex = (ringBufferInsertionIndex + AppConfig.Audio.BUFFER_SIZE) % AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+        ringBufferInsertionIndex = (ringBufferInsertionIndex + AppConfig.Audio.BUFFER_SIZE) % bufferSize
 
         samplesInRingBuffer = minOf(
             samplesInRingBuffer + AppConfig.Audio.BUFFER_SIZE,
-            AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+            bufferSize
         )
     }
 
     fun ringBufferGetAll():ShortArray{
-        val bufferContent = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+        val bufferSize = ringBuffer.size
+        val bufferContent = ShortArray(bufferSize)
         System.arraycopy(ringBuffer, ringBufferInsertionIndex, bufferContent,
-            0,AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex)
+            0,bufferSize-ringBufferInsertionIndex)
         System.arraycopy(ringBuffer,0,bufferContent,
-            AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE-ringBufferInsertionIndex,ringBufferInsertionIndex)
+            bufferSize-ringBufferInsertionIndex,ringBufferInsertionIndex)
         return bufferContent
     }
 
-    private fun saveLocationMetadata(directory: File) {
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-
-            fusedLocationClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, null)
-                .addOnSuccessListener { location ->
-                    if (location != null) {
-                        val metadataFile = File(directory, "metadata.json")
-                        
-                        // Create initial Recording object with location data
-                        val recording = Recording(
-                            latitude = location.latitude,
-                            longitude = location.longitude,
-                            timestamp = System.currentTimeMillis()
-                        )
-                        
-                        // Encode to JSON string and write to file
-                        metadataFile.writeText(Json.encodeToString(recording))
-                    }
-                }
-        }
+    private fun saveInitialMetadata(directory: File) {
+        val metadataFile = File(directory, "metadata.json")
+        val recording = Recording(
+            timestamp = System.currentTimeMillis()
+        )
+        metadataFile.writeText(Json.encodeToString(recording))
     }
 
     private fun completeMetadata() {
@@ -410,7 +403,7 @@ class ListeningService : Service() {
 
             // 4. Encode and save back
             metadataFile.writeText(Json.encodeToString(recording))
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             // Log or handle error
         }
     }

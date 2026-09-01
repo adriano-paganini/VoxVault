@@ -29,17 +29,18 @@ object AppConfig {
         /**
          * Duration of silence to stop a recording in milliseconds
          */
-        const val RECORDING_MAX_SILENCE = 20000
+        var RECORDING_MAX_SILENCE = SettingsManager.DEFAULT_MAX_SILENCE_TIME
 
-        const val PRE_RECORDING_BUFFER_LENGTH_MS = 5000
+        var PRE_RECORDING_BUFFER_LENGTH_MS = SettingsManager.DEFAULT_PRE_BUFFER_LENGTH
 
         /**
          * Number of samples required to store [PRE_RECORDING_BUFFER_LENGTH_MS] of audio.
          * (16,000 * 5,000) / 1,000 = 80,000
          */
-        const val PRE_RECORDING_BUFFER_SIZE = (SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000
+        val PRE_RECORDING_BUFFER_SIZE: Int
+            get() = ((SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000).toInt()
 
-        const val RECORDING_CHUNK_SIZE_MS = 120000
+        const val RECORDING_CHUNK_SIZE_MS = 120000L
     }
 
     object VAD {
@@ -47,7 +48,7 @@ object AppConfig {
         val FRAME_SIZE = FrameSize.FRAME_SIZE_1536
         val MODE = Mode.NORMAL
         const val SILENCE_DURATION_MS = 500
-        const val SPEECH_DURATION_MS = 100
+        const val SPEECH_DURATION_MS = 250
     }
 
     object UI {
@@ -65,7 +66,6 @@ object AppConfig {
             }
         }
 
-        const val LIST_ITEM_PADDING_TOP = 100
         const val NOTIFICATION_CHANNEL_ID = "voxvault_listening_channel"
         const val NOTIFICATION_ID = 1001
     }
@@ -78,9 +78,7 @@ object AppConfig {
         val REQUIRED: Array<String>
             get() {
                 val list = mutableListOf(
-                    Manifest.permission.RECORD_AUDIO,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_FINE_LOCATION
+                    Manifest.permission.RECORD_AUDIO
                 )
                 
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -89,5 +87,14 @@ object AppConfig {
                 
                 return list.toTypedArray()
             }
+    }
+
+    object Web{
+        var BACKEND_ADDRESS = SettingsManager.DEFAULT_BACKEND_URL
+        var BACKEND_PORT = SettingsManager.DEFAULT_BACKEND_PORT
+    }
+
+    object Encryption{
+        var ENCRYPTION_PUBLIC_KEY = SettingsManager.DEFAULT_ENCRYPTION_PUBLIC_KEY
     }
 }

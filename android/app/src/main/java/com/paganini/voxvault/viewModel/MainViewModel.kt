@@ -9,6 +9,7 @@ import android.os.IBinder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import com.paganini.voxvault.service.HttpCommunicationService
 import com.paganini.voxvault.service.ListeningService
 import com.paganini.voxvault.service.RecordingFileReaderService
 
@@ -18,6 +19,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val listeningService: LiveData<ListeningService?> = _listeningService
 
     var recordingFileReaderService = RecordingFileReaderService(application)
+
+    var httpCommunicationService = HttpCommunicationService(application)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
