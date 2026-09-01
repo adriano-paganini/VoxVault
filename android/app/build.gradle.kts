@@ -43,6 +43,7 @@ dependencies {
     implementation(libs.androidx.navigation.fragment.ktx)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.navigation.ui.ktx)
+    implementation("com.google.crypto.tink:tink-android:1.23.0")
     implementation(libs.okhttp)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.silero)

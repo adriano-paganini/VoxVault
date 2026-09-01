@@ -1,7 +1,9 @@
 package com.paganini.voxvault
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Button
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.textfield.TextInputEditText
@@ -12,6 +14,7 @@ import kotlinx.coroutines.launch
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var settingsManager: SettingsManager
+    private lateinit var encryptionPublicKeyEdit: TextInputEditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -23,7 +26,7 @@ class SettingsActivity : AppCompatActivity() {
         val backendPortEdit = findViewById<TextInputEditText>(R.id.backendPortEdit)
         val maxSilenceEdit = findViewById<TextInputEditText>(R.id.maxSilenceEdit)
         val preBufferEdit = findViewById<TextInputEditText>(R.id.preBufferEdit)
-        val encryptionPublicKeyEdit = findViewById<TextInputEditText>(R.id.encryptionPublicKeyEdit)
+        encryptionPublicKeyEdit = findViewById(R.id.encryptionPublicKeyEdit)
         
         val maxSilenceLayout = findViewById<TextInputLayout>(R.id.maxSilenceLayout)
         val preBufferLayout = findViewById<TextInputLayout>(R.id.preBufferLayout)
@@ -37,6 +40,8 @@ class SettingsActivity : AppCompatActivity() {
             maxSilenceEdit.setText((settingsManager.maxSilenceTimeFlow.first() / 1000.0).toString())
             preBufferEdit.setText((settingsManager.preBufferLengthFlow.first() / 1000.0).toString())
             encryptionPublicKeyEdit.setText(settingsManager.encryptionPublicKeyFlow.first())
+            
+            handleDeepLink(intent)
         }
 
         saveButton.setOnClickListener {
@@ -86,6 +91,27 @@ class SettingsActivity : AppCompatActivity() {
                 settingsManager.updatePreBufferLength((preBufferSec * 1000).toLong())
                 settingsManager.updateEncryptionPublicKey(encryptionKey)
                 finish()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent?) {
+        val data = intent?.data ?: return
+        if ((data.scheme == "voxvault" || data.scheme == "intent") && data.host == "setup") {
+            val key = data.getQueryParameter("key")?.replace(" ", "+") ?: return
+            if (key.length == 44) {
+                encryptionPublicKeyEdit.setText(key)
+                AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY = key
+                lifecycleScope.launch {
+                    settingsManager.updateEncryptionPublicKey(key)
+                    Toast.makeText(this@SettingsActivity, "Public key saved from link", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }

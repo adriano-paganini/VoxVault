@@ -72,10 +72,30 @@ async function renderQr(targetId, text) {
   target.innerHTML = await response.text();
 }
 
+async function renderPublicKeyQr(targetId, fallbackDeepLink) {
+  const target = document.querySelector(`#${targetId}`);
+  const response = await fetch("/api/keys/qrcode", {cache: "no-store"});
+
+  if (response.ok) {
+    target.innerHTML = await response.text();
+    return;
+  }
+
+  if (!fallbackDeepLink) {
+    throw await response.json();
+  }
+
+  await renderQr(targetId, fallbackDeepLink);
+}
+
+function publicKeyQrLink(data) {
+  return data.publicKeyQrLink || data.publicKeyDeepLink || `voxvault://setup?key=${encodeURIComponent(data.publicKey)}`;
+}
+
 async function showPublicKey() {
   const data = await requestJson("/api/keys/public");
   document.querySelector("#public-key-output").textContent = data.publicKey;
-  await renderQr("public-key-qr", data.publicKey);
+  await renderPublicKeyQr("public-key-qr", publicKeyQrLink(data));
   publicKeySummary.classList.add("hidden");
   publicKeyCard.classList.remove("hidden");
   showOnly(publicKeyView);
@@ -93,8 +113,7 @@ async function revealCreatedKeys() {
   document.querySelector("#private-key-output").textContent = createdKeys.privateKey;
   document.querySelector("#created-public-key-output").textContent = createdKeys.publicKey;
 
-  await renderQr("private-key-qr", createdKeys.privateKey);
-  await renderQr("created-public-key-qr", createdKeys.publicKey);
+  await renderPublicKeyQr("created-public-key-qr", publicKeyQrLink(createdKeys));
 
   showOnly(createdKeysView);
 }
@@ -102,7 +121,6 @@ async function revealCreatedKeys() {
 function hideCreatedKeys() {
   clearInput("private-key-output");
   clearInput("created-public-key-output");
-  clearElement("private-key-qr");
   clearElement("created-public-key-qr");
   showOnly(warningView);
 }

@@ -134,6 +134,12 @@ class MainActivity : AppCompatActivity() {
                 first = false
             }
         }
+
+        lifecycleScope.launch {
+            settingsManager.encryptionPublicKeyFlow.collect { key ->
+                AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY = key
+            }
+        }
     }
 
     private fun restartServiceIfListening() {
