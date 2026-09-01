@@ -24,7 +24,7 @@ class RecordingFileReaderService(application: Application) {
                 try {
                     val jsonText = metadataFile.readText()
                     val fieldCount = Json.parseToJsonElement(jsonText).jsonObject.size
-                    if(fieldCount==3){
+                    if (fieldCount >= 3) {
                         // Convert JSON string directly to Recording object
                         Json.decodeFromString<Recording>(jsonText)
                     } else {

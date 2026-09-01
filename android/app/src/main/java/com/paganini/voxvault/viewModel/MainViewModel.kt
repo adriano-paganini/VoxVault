@@ -20,7 +20,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     var recordingFileReaderService = RecordingFileReaderService(application)
 
-    var httpCommunicationService = HttpCommunicationService()
+    var httpCommunicationService = HttpCommunicationService(application)
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {

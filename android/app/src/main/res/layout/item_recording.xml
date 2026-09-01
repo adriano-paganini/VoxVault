@@ -7,44 +7,56 @@
     app:cardCornerRadius="12dp"
     app:cardElevation="2dp">
 
-    <LinearLayout
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:paddingHorizontal="20dp"
-        android:paddingVertical="12dp">
+        android:layout_height="wrap_content">
 
-        <CheckBox
-            android:id="@+id/recordingCheckbox"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="12dp" />
-
-        <TextView
-            android:id="@+id/recordingDate"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/recordingDuration"
+        <View
+            android:id="@+id/uploadProgressBar"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:gravity="center"
-            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:layout_height="match_parent"
+            android:background="#4CAF50"
+            android:alpha="0.3" />
 
-        <TextView
-            android:id="@+id/recordingTime"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-            android:textColor="?attr/colorPrimary"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="20dp"
+            android:paddingVertical="12dp">
 
-    </LinearLayout>
+            <CheckBox
+                android:id="@+id/recordingCheckbox"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp" />
+
+            <TextView
+                android:id="@+id/recordingDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/recordingDuration"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                android:textColor="?android:attr/textColorSecondary" />
+
+            <TextView
+                android:id="@+id/recordingTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                android:textColor="?attr/colorPrimary"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+    </FrameLayout>
 </androidx.cardview.widget.CardView>
