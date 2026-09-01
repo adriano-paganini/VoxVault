@@ -91,5 +91,10 @@ object AppConfig {
 
     object Web{
         var BACKEND_ADDRESS = SettingsManager.DEFAULT_BACKEND_URL
+        var BACKEND_PORT = SettingsManager.DEFAULT_BACKEND_PORT
+    }
+
+    object Encryption{
+        var ENCRYPTION_PUBLIC_KEY = SettingsManager.DEFAULT_ENCRYPTION_PUBLIC_KEY
     }
 }

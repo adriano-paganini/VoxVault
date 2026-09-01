@@ -20,6 +20,7 @@ COPY main.py .
 COPY encryption.py .
 COPY static ./static
 
-EXPOSE 8000
+ENV VOXVAULT_PORT=8000
+EXPOSE ${VOXVAULT_PORT}
 
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${VOXVAULT_PORT}"]

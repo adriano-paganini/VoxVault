@@ -65,6 +65,8 @@ class HttpCommunicationService(private val context: Context) {
     }
     private fun getUrl(endpoint: String = "ping"): String {
         var baseUrl = AppConfig.Web.BACKEND_ADDRESS
+        val port = AppConfig.Web.BACKEND_PORT
+
         if (!baseUrl.startsWith("http")) {
             baseUrl = "http://$baseUrl"
         }
@@ -77,7 +79,7 @@ class HttpCommunicationService(private val context: Context) {
         val url = if (baseUrl.indexOf(":", 7) != -1) {
             "$baseUrl/$endpoint"
         } else {
-            "$baseUrl:8000/$endpoint"
+            "$baseUrl:$port/$endpoint"
         }
         return url
     }

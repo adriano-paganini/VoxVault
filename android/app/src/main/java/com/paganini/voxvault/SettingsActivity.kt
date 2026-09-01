@@ -20,25 +20,33 @@ class SettingsActivity : AppCompatActivity() {
         settingsManager = SettingsManager(this)
 
         val backendUrlEdit = findViewById<TextInputEditText>(R.id.backendUrlEdit)
+        val backendPortEdit = findViewById<TextInputEditText>(R.id.backendPortEdit)
         val maxSilenceEdit = findViewById<TextInputEditText>(R.id.maxSilenceEdit)
         val preBufferEdit = findViewById<TextInputEditText>(R.id.preBufferEdit)
+        val encryptionPublicKeyEdit = findViewById<TextInputEditText>(R.id.encryptionPublicKeyEdit)
         
         val maxSilenceLayout = findViewById<TextInputLayout>(R.id.maxSilenceLayout)
         val preBufferLayout = findViewById<TextInputLayout>(R.id.preBufferLayout)
+        val encryptionPublicKeyLayout = findViewById<TextInputLayout>(R.id.encryptionPublicKeyLayout)
         
         val saveButton = findViewById<Button>(R.id.saveButton)
 
         lifecycleScope.launch {
             backendUrlEdit.setText(settingsManager.backendUrlFlow.first())
+            backendPortEdit.setText(settingsManager.backendPortFlow.first())
             maxSilenceEdit.setText((settingsManager.maxSilenceTimeFlow.first() / 1000.0).toString())
             preBufferEdit.setText((settingsManager.preBufferLengthFlow.first() / 1000.0).toString())
+            encryptionPublicKeyEdit.setText(settingsManager.encryptionPublicKeyFlow.first())
         }
 
         saveButton.setOnClickListener {
             val backendUrl = backendUrlEdit.text.toString()
+            val backendPort = backendPortEdit.text.toString()
             
             val maxSilenceSec = maxSilenceEdit.text.toString().toDoubleOrNull() ?: 0.0
             val preBufferSec = preBufferEdit.text.toString().toDoubleOrNull() ?: 0.0
+
+            val encryptionKey = encryptionPublicKeyEdit.text.toString()
 
             var isValid = true
 
@@ -62,12 +70,21 @@ class SettingsActivity : AppCompatActivity() {
                 preBufferLayout.error = null
             }
 
+            if (encryptionKey.isNotEmpty() && encryptionKey.length != 44) {
+                encryptionPublicKeyLayout.error = "Public key must be 44 characters long"
+                isValid = false
+            } else {
+                encryptionPublicKeyLayout.error = null
+            }
+
             if (!isValid) return@setOnClickListener
 
             lifecycleScope.launch {
                 settingsManager.updateBackendUrl(backendUrl)
+                settingsManager.updateBackendPort(backendPort)
                 settingsManager.updateMaxSilenceTime((maxSilenceSec * 1000).toLong())
                 settingsManager.updatePreBufferLength((preBufferSec * 1000).toLong())
+                settingsManager.updateEncryptionPublicKey(encryptionKey)
                 finish()
             }
         }

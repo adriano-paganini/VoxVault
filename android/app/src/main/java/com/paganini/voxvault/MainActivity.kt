@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity() {
     // region Lifecycle
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
+
         // UI Initialization
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
@@ -110,6 +110,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         lifecycleScope.launch {
+            settingsManager.backendPortFlow.collect { port ->
+                AppConfig.Web.BACKEND_PORT = port
+            }
+        }
+
+        lifecycleScope.launch {
             var first = true
             settingsManager.maxSilenceTimeFlow.collect { time ->
                 val changed = AppConfig.Audio.RECORDING_MAX_SILENCE != time
@@ -138,7 +144,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun setupRecordingFileReaderService(){
+    fun setupRecordingFileReaderService() {
         lifecycleScope.launch {
             while (true) {
                 val recordings = viewModel.recordingFileReaderService.getAllRecordings()
@@ -155,7 +161,7 @@ class MainActivity : AppCompatActivity() {
     private fun syncUIWithService(service: ListeningService, toggle: ToggleButton, root: View) {
         toggle.isChecked = service.isListening
         val color = AppConfig.UI.getStateColor(service.isListening, service.sharedSpeaking)
-        
+
         root.setBackgroundColor(Color.TRANSPARENT)
         toggle.backgroundTintList = ColorStateList.valueOf(color)
     }
@@ -176,7 +182,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupClickListeners() {
-        findViewById<ToggleButton>(R.id.listeningToggle).setOnClickListener {
+        val listeningToggle = findViewById<ToggleButton>(R.id.listeningToggle)
+        listeningToggle.setOnClickListener {
+            listeningToggle.isChecked = false
+            if (AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY.isEmpty()){
+                Toast.makeText(
+                    this@MainActivity,
+                    "Please setup the public encryption Key before recording!",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
             currentService?.toggle()
         }
 
@@ -202,7 +218,14 @@ class MainActivity : AppCompatActivity() {
                 child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
             }.toList()
 
-            if (toDelete.isEmpty()) return@setOnClickListener
+            if (toDelete.isEmpty()){
+                Toast.makeText(
+                    this@MainActivity,
+                    "Please select at least one recording to delete.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
 
             val count = toDelete.size
             var totalDuration = 0.0
@@ -212,7 +235,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val durationText = formatDuration(totalDuration)
-            
+
             val message = if (count == 1) {
                 "Do you want to delete this recording with a length of $durationText?"
             } else {
@@ -232,10 +255,28 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.uploadButton).setOnClickListener {
-            val selectedRecordingViews = findViewById<LinearLayout>(R.id.recordingLinearLayout).children.filter {
-                val checkbox = it.findViewById<CheckBox>(R.id.recordingCheckbox)
-                checkbox.isChecked
-            }.toList()
+            if (AppConfig.Web.BACKEND_ADDRESS.isEmpty()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Please update the Backend URL in the settings.",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
+            val selectedRecordingViews =
+                findViewById<LinearLayout>(R.id.recordingLinearLayout).children.filter {
+                    val checkbox = it.findViewById<CheckBox>(R.id.recordingCheckbox)
+                    checkbox.isChecked
+                }.toList()
+
+            if (selectedRecordingViews.isEmpty()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Please select at least one recording to upload",
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@setOnClickListener
+            }
 
             for (recView in selectedRecordingViews) {
                 lifecycleScope.launch(Dispatchers.IO) {
@@ -248,19 +289,23 @@ class MainActivity : AppCompatActivity() {
                         recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
                     }
 
-                    val result = viewModel.httpCommunicationService.sendRecording(recording) { current, total ->
-                        lifecycleScope.launch(Dispatchers.Main) {
-                            val progress = current.toFloat() / total
-                            val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
-                            progressBar.layoutParams.width = (recView.width * progress).toInt()
-                            progressBar.requestLayout()
+                    val result =
+                        viewModel.httpCommunicationService.sendRecording(recording) { current, total ->
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                val progress = current.toFloat() / total
+                                val progressBar =
+                                    recView.findViewById<View>(R.id.uploadProgressBar)
+                                progressBar.layoutParams.width =
+                                    (recView.width * progress).toInt()
+                                progressBar.requestLayout()
+                            }
                         }
-                    }
 
                     withContext(Dispatchers.Main) {
                         if (result.startsWith("Failure") || result.startsWith("Error")) {
                             Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
-                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled = true
+                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled =
+                                true
                             progressBar.layoutParams.width = 0
                             recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
                         } else {
