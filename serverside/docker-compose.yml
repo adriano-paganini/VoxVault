@@ -1,0 +1,9 @@
+services:
+  voxvault:
+    build: .
+    image: voxvault-server:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${VOXVAULT_PRIVATE_KEY_HOST:-/etc/voxvault/server-privatekey.key}:/run/secrets/voxvault-private-key:ro
+      - ${VOXVAULT_PUBLIC_KEY_HOST:-/etc/voxvault/server-publickey.key}:/run/secrets/voxvault-public-key:ro
