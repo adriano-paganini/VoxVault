@@ -38,8 +38,17 @@
 
         <activity
             android:name=".SettingsActivity"
-            android:exported="false"
-            android:label="@string/settings_title" />
+            android:exported="true"
+            android:label="@string/settings_title"
+            android:launchMode="singleTop">
+            <intent-filter android:label="Configure VoxVault">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="voxvault" android:host="setup" />
+                <data android:scheme="intent" android:host="setup" />
+            </intent-filter>
+        </activity>
     </application>
 
 </manifest>

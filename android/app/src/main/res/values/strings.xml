@@ -9,8 +9,10 @@
     <string name="recordings_title">Recordings</string>
     <string name="settings_title">Settings</string>
     <string name="backend_url">Backend URL</string>
+    <string name="backend_port">Port</string>
     <string name="max_silence">Max Silence (seconds)</string>
     <string name="pre_buffer">Pre-buffer Length (seconds)</string>
+    <string name="encryption_public_key">Encryption Public Key (44 chars)</string>
     <string name="save">Save</string>
     <string name="upload_success">Upload Success</string>
 </resources>

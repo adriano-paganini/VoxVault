@@ -22,7 +22,8 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="24dp"
         android:hint="@string/backend_url"
-        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintEnd_toStartOf="@+id/backendPortLayout"
+        app:layout_constraintHorizontal_weight="3"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/settingsTitle">
 
@@ -31,6 +32,25 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:inputType="textUri" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/backendPortLayout"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:layout_marginTop="24dp"
+        android:hint="@string/backend_port"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_weight="1"
+        app:layout_constraintStart_toEndOf="@+id/backendUrlLayout"
+        app:layout_constraintTop_toBottomOf="@id/settingsTitle">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/backendPortEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="number" />
     </com.google.android.material.textfield.TextInputLayout>
 
     <com.google.android.material.textfield.TextInputLayout
@@ -67,6 +87,23 @@
             android:inputType="numberDecimal" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/encryptionPublicKeyLayout"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:hint="@string/encryption_public_key"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/preBufferLayout">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/encryptionPublicKeyEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
+
     <Button
         android:id="@+id/saveButton"
         android:layout_width="0dp"
@@ -75,6 +112,6 @@
         android:text="@string/save"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/preBufferLayout" />
+        app:layout_constraintTop_toBottomOf="@id/encryptionPublicKeyLayout" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
