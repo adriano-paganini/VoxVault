@@ -11,7 +11,6 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.Toast
 import android.widget.ToggleButton
 import androidx.activity.enableEdgeToEdge
@@ -32,7 +31,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
-import androidx.core.view.isVisible
 
 class MainActivity : AppCompatActivity() {
 
@@ -188,16 +186,11 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.selectAll).setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-            val selectableChildren = parent.children.filter { child ->
-                val recording = child.tag as? Recording
-                recording?.isUploaded == false
-            }
-
-            val anyUnchecked = selectableChildren.any { child ->
+            val anyUnchecked = parent.children.any { child ->
                 !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
             }
 
-            selectableChildren.forEach { child ->
+            parent.children.forEach { child ->
                 child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = anyUnchecked
             }
             updateSelectAllButtonText()
@@ -239,19 +232,19 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.uploadButton).setOnClickListener {
-            lifecycleScope.launch(Dispatchers.IO) {
-                val selectedRecordingViews = findViewById<LinearLayout>(R.id.recordingLinearLayout).children.filter {
-                    val checkbox = it.findViewById<CheckBox>(R.id.recordingCheckbox)
-                    checkbox.isVisible && checkbox.isChecked
-                }.toList()
+            val selectedRecordingViews = findViewById<LinearLayout>(R.id.recordingLinearLayout).children.filter {
+                val checkbox = it.findViewById<CheckBox>(R.id.recordingCheckbox)
+                checkbox.isChecked
+            }.toList()
 
-                for (recView in selectedRecordingViews) {
+            for (recView in selectedRecordingViews) {
+                lifecycleScope.launch(Dispatchers.IO) {
                     val recording: Recording = recView.tag as Recording
+                    val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
 
                     withContext(Dispatchers.Main) {
-                        recView.findViewById<CheckBox>(R.id.recordingCheckbox).visibility = View.GONE
-                        recView.findViewById<ProgressBar>(R.id.uploadLoadingIndicator).visibility = View.VISIBLE
-                        recView.findViewById<View>(R.id.uploadProgressBar).layoutParams.width = 0
+                        recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled = false
+                        progressBar.layoutParams.width = 0
                         recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
                     }
 
@@ -265,23 +258,28 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     withContext(Dispatchers.Main) {
-                        recView.findViewById<ProgressBar>(R.id.uploadLoadingIndicator).visibility = View.GONE
                         if (result.startsWith("Failure") || result.startsWith("Error")) {
-                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).visibility = View.VISIBLE
-                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = false
-                            recView.findViewById<View>(R.id.uploadProgressBar).layoutParams.width = 0
+                            Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
+                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled = true
+                            progressBar.layoutParams.width = 0
                             recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
                         } else {
-                            recording.isUploaded = true
-                            recording.save(filesDir)
-                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = false
-                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).visibility = View.GONE
-                            // Ensure full green at the end
+                            // Ensure full green
                             val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
                             progressBar.layoutParams.width = recView.width
                             progressBar.requestLayout()
+
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Upload succeeded: ${recording.name}. Deleting in 5s.",
+                                Toast.LENGTH_SHORT
+                            ).show()
+
+                            launch {
+                                delay(5.seconds)
+                                deleteRecording(recView)
+                            }
                         }
-                        Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
                         updateSelectAllButtonText()
                     }
                 }
@@ -305,16 +303,11 @@ class MainActivity : AppCompatActivity() {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
         val selectAllButton = findViewById<Button>(R.id.selectAll)
 
-        val selectableChildren = parent.children.filter { child ->
-            val recording = child.tag as? Recording
-            recording?.isUploaded == false
-        }
-
-        val anyUnchecked = selectableChildren.any { child ->
+        val anyUnchecked = parent.children.any { child ->
             !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
         }
 
-        if (anyUnchecked || selectableChildren.none()) {
+        if (anyUnchecked || parent.children.none()) {
             selectAllButton.setText(R.string.select_all)
         } else {
             selectAllButton.setText(R.string.deselect_all)

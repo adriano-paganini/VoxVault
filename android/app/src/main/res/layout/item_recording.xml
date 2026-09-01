@@ -26,24 +26,11 @@
             android:paddingHorizontal="20dp"
             android:paddingVertical="12dp">
 
-            <FrameLayout
+            <CheckBox
+                android:id="@+id/recordingCheckbox"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="12dp">
-
-                <CheckBox
-                    android:id="@+id/recordingCheckbox"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
-
-                <ProgressBar
-                    android:id="@+id/uploadLoadingIndicator"
-                    style="?android:attr/progressBarStyleSmall"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
-                    android:layout_gravity="center"
-                    android:visibility="gone" />
-            </FrameLayout>
+                android:layout_marginEnd="12dp" />
 
             <TextView
                 android:id="@+id/recordingDate"

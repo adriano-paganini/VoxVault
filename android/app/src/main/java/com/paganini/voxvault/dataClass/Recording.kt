@@ -9,8 +9,6 @@ import com.paganini.voxvault.Chunker
 import com.paganini.voxvault.R
 import kotlinx.serialization.InternalSerializationApi
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -21,34 +19,17 @@ data class Recording(
     var name: String = "",
     var duration: Double = 0.0,
     val timestamp: Long = 0L,
-    var isUploaded: Boolean = false
 ) {
 
     fun getChunker(filesDir: java.io.File): Chunker {
         return Chunker(this, filesDir)
     }
-
-    fun save(filesDir: java.io.File) {
-        val recordingDir = java.io.File(filesDir, "recordings/$name")
-        if (recordingDir.exists()) {
-            val metadataFile = java.io.File(recordingDir, "metadata.json")
-            metadataFile.writeText(Json.encodeToString(this))
-        }
-    }
-
     fun getView(context: Context, parent: ViewGroup? = null): View {
         val inflater = LayoutInflater.from(context)
         val view = inflater.inflate(R.layout.item_recording, parent, false)
         view.tag = this
 
-        if (isUploaded) {
-            view.findViewById<android.widget.CheckBox>(R.id.recordingCheckbox).visibility = View.GONE
-            val progressBar = view.findViewById<View>(R.id.uploadProgressBar)
-            view.post {
-                progressBar.layoutParams.width = view.width
-                progressBar.requestLayout()
-            }
-        }
+        
         val dateView = view.findViewById<TextView>(R.id.recordingDate)
         val timeView = view.findViewById<TextView>(R.id.recordingTime)
         val durationView = view.findViewById<TextView>(R.id.recordingDuration)
