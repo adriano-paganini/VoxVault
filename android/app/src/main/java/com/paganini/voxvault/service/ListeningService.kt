@@ -52,6 +52,8 @@ class ListeningService : Service() {
     private var currentFile : File?= null
     private var currentFileOutputStream : FileOutputStream? = null
 
+    private var encryptionService: EncryptionService? = null
+
     inner class LocalBinder : Binder() {
         fun getService(): ListeningService = this@ListeningService
     }
@@ -279,6 +281,8 @@ class ListeningService : Service() {
          recordingDir.mkdirs()
 
         currentFile = File("$recordingDir/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
+
+        encryptionService = EncryptionService(currentFile)
 
         saveInitialMetadata(recordingDir)
 
