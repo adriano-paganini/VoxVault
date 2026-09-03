@@ -4,10 +4,11 @@ from os import getenv
 from pathlib import Path
 import subprocess
 from urllib.parse import quote
-import base64
 
 import qrcode
 import qrcode.image.svg
+
+import audio_processer
 
 from Recording import Recording
 from encryption import (
@@ -16,7 +17,6 @@ from encryption import (
     key_exists,
     private_key_host_path,
     private_key_path,
-    decrypt_data,
 )
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -280,18 +280,9 @@ async def upload(chunk: UploadChunkRequest):
     recording.add_chunk(chunk.chunkIndex, chunk.data)
 
     if recording.stitch():
-        recording_audio = recording.complete
-        save_debug_mp3(
-            recording_audio,
-            chunk.timestamp,
-            chunk.chunkIndex,
-        )
+        subprocess.Popen(audio_processer.process_audio_bytes(recording.complete,timestamp))
         del recordings[chunk.timestamp]
-    #2. store the decrypted Data temporarily, until all chunks have been received.
-    # some custom data-type ideally
-    #3. if the custom-data-type is complete, put all chunks together
-    #4. convert complete object to text and store it
-    #5. extract voice-embeddings
+
     return {
         "message": f"received : {len(chunk.data)}",
     }
