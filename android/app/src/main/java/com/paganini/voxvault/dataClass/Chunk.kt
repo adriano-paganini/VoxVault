@@ -10,7 +10,7 @@ data class Chunk(
     val totalChunks: Int,
     val chunkIndex: Int,
     val encryptedSerializedSymmetricKey: String,
-    val data: ShortArray
+    val data: String
 ) {
 
     override fun equals(other: Any?): Boolean {
@@ -31,7 +31,7 @@ data class Chunk(
         var result = timestamp.hashCode()
         result = 31 * result + totalChunks
         result = 31 * result + chunkIndex
-        result = 31 * result + data.contentHashCode()
+        result = 31 * result + data.hashCode()
         return result
     }
 }

@@ -2,6 +2,7 @@ from io import BytesIO
 from json import dumps, loads
 from os import getenv
 from urllib.parse import quote
+import base64
 
 import qrcode
 import qrcode.image.svg
@@ -34,7 +35,7 @@ class UploadChunkRequest(BaseModel):
     totalChunks: int
     chunkIndex: int
     encryptedSerializedSymmetricKey: str
-    data: list[ShortInt]
+    data: str
 
 
 class QrCodeRequest(BaseModel):
@@ -228,7 +229,16 @@ async def upload(chunk: UploadChunkRequest):
         "body": model_to_dict(chunk),
     })
     print(f"Received upload: {upload_json}", flush=True)
+
+    decoded_encrypted_data = base64.b64decode(chunk.data)
+    decoded_symmetric_encryption_key = base64.b64decode(chunk.encryptedSerializedSymmetricKey)
+    # 1. decrypt the decoded_encrypted_data
+    #data = decrypt_data(decoded_encrypted_data, decoded_symmetric_encryption_key)
+    #2. store the decrypted Data temporarily, until all chunks have been received.
+    # some custom data-type ideally
+    #3. if the custom-data-type is complete, put all chunks together
+    #4. convert complete object to text and store it
+    #5. extract voice-embeddings
     return {
-        "message": f"received : {len(chunk.data)}",
-        "serverDebugVersion": SERVER_DEBUG_VERSION,
+        "message": f"received : {len(chunk.data)}"
     }
