@@ -92,14 +92,14 @@ async function renderPublicKeyQr(targetId, fallbackDeepLink) {
   await renderQr(targetId, fallbackDeepLink);
 }
 
-function publicKeyQrLink(data) {
-  return data.publicKeyQrLink || data.publicKeyDeepLink || `voxvault://setup?key=${encodeURIComponent(data.publicKey)}`;
+function publicKeyDeepLink(data) {
+  return data.publicKeyDeepLink || `voxvault://setup?key=${encodeURIComponent(data.publicKey)}`;
 }
 
 async function showPublicKey() {
   const data = await requestJson("/api/keys/public");
   document.querySelector("#public-key-output").textContent = data.publicKey;
-  await renderPublicKeyQr("public-key-qr", publicKeyQrLink(data));
+  await renderPublicKeyQr("public-key-qr", publicKeyDeepLink(data));
   publicKeySummary.classList.add("hidden");
   publicKeyCard.classList.remove("hidden");
   showOnly(publicKeyView);
@@ -118,7 +118,7 @@ async function revealCreatedKeys() {
   document.querySelector("#created-public-key-output").textContent = createdKeys.publicKey;
 
   await renderQr("private-key-qr", createdKeys.privateKey);
-  await renderPublicKeyQr("created-public-key-qr", publicKeyQrLink(createdKeys));
+  await renderPublicKeyQr("created-public-key-qr", publicKeyDeepLink(createdKeys));
 
   showOnly(createdKeysView);
 }

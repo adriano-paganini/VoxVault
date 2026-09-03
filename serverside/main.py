@@ -3,11 +3,14 @@ from json import dumps, loads
 from os import getenv
 from pathlib import Path
 import subprocess
+from threading import Thread
 from urllib.parse import quote
 
 import qrcode
 import qrcode.image.svg
+from dotenv import load_dotenv
 
+load_dotenv()
 import audio_processer
 
 from Recording import Recording
@@ -31,8 +34,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 ShortInt = conint(ge=-32768, le=32767)
 upload_events = []
 recordings = {}
-SERVER_DEBUG_VERSION = "upload-debug-2026-09-03-1"
-DEBUG_AUDIO_DIR = Path(getenv("VOXVAULT_DEBUG_AUDIO_DIR", "debug_audio"))
 PCM_SAMPLE_RATE = 16000
 PCM_CHANNELS = 1
 
@@ -67,61 +68,8 @@ def remember_upload_event(event):
     upload_events.insert(0, event)
     del upload_events[10:]
 
-
-def save_debug_mp3(pcm_bytes: bytes, timestamp: int, chunk_index: int) -> str:
-    DEBUG_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = DEBUG_AUDIO_DIR / f"{timestamp}_chunk_{chunk_index:03d}.mp3"
-
-    subprocess.run(
-        [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "s16le",
-            "-ar",
-            str(PCM_SAMPLE_RATE),
-            "-ac",
-            str(PCM_CHANNELS),
-            "-i",
-            "pipe:0",
-            "-codec:a",
-            "libmp3lame",
-            str(output_path),
-        ],
-        input=pcm_bytes,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
-
-    return str(output_path)
-
-
 def public_key_deep_link(public_key: str):
     return f"voxvault://setup?key={quote(public_key, safe='')}"
-
-
-def public_key_intent_link(public_key: str):
-    encoded_key = quote(public_key, safe="")
-    return (
-        "intent://setup"
-        f"?key={encoded_key}"
-        "#Intent;scheme=voxvault;package=com.paganini.voxvault;end"
-    )
-
-
-def public_base_url():
-    base_url = getenv("VOXVAULT_PUBLIC_BASE_URL", "").strip()
-    return base_url.rstrip("/")
-
-
-def public_key_qr_link(request: Request, public_key: str):
-    base_url = public_base_url()
-
-    if not base_url:
-        return public_key_deep_link(public_key)
-
-    return f"{base_url}/setup?key={quote(public_key, safe='')}"
 
 
 def public_key_response(request: Request):
@@ -131,14 +79,12 @@ def public_key_response(request: Request):
         "privateKeyHostPath": private_key_host_path(),
         "publicKey": key,
         "publicKeyDeepLink": public_key_deep_link(key),
-        "publicKeyIntentLink": public_key_intent_link(key),
-        "publicKeyQrLink": public_key_qr_link(request, key),
     }
 
 
 @app.get("/")
 async def root():
-    return {"message": "Hello World", "serverDebugVersion": SERVER_DEBUG_VERSION}
+    return {"message": "Hello World"}
 
 
 @app.get("/ui", include_in_schema=False)
@@ -148,7 +94,6 @@ async def ui():
 
 @app.get("/setup", include_in_schema=False)
 async def setup_deep_link(key: str):
-    intent_link = public_key_intent_link(key)
     deep_link = public_key_deep_link(key)
     return HTMLResponse(f"""<!doctype html>
 <html lang="en">
@@ -161,10 +106,7 @@ async def setup_deep_link(key: str):
     <p>Opening VoxVault...</p>
     <p><a href="{deep_link}">Open VoxVault</a></p>
     <script>
-      window.location.href = {dumps(intent_link)};
-      setTimeout(() => {{
-        window.location.href = {dumps(deep_link)};
-      }}, 600);
+      window.location.href = {dumps(deep_link)};
     </script>
   </body>
 </html>""")
@@ -183,8 +125,6 @@ async def key_status():
 async def create_keys(request: Request):
     keys = create_encryption_keys()
     keys["publicKeyDeepLink"] = public_key_deep_link(keys["publicKey"])
-    keys["publicKeyIntentLink"] = public_key_intent_link(keys["publicKey"])
-    keys["publicKeyQrLink"] = public_key_qr_link(request, keys["publicKey"])
     return keys
 
 
@@ -202,7 +142,7 @@ async def public_key_qr(request: Request):
         raise HTTPException(status_code=404, detail="Keys have not been created yet")
 
     qr = qrcode.make(
-        public_key_response(request)["publicKeyQrLink"],
+        public_key_response(request)["publicKeyDeepLink"],
         image_factory=qrcode.image.svg.SvgPathImage,
     )
     stream = BytesIO()
@@ -254,7 +194,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.get("/api/uploads")
 async def uploads():
     return {
-        "serverDebugVersion": SERVER_DEBUG_VERSION,
         "uploads": upload_events,
     }
 
@@ -280,7 +219,11 @@ async def upload(chunk: UploadChunkRequest):
     recording.add_chunk(chunk.chunkIndex, chunk.data)
 
     if recording.stitch():
-        subprocess.Popen(audio_processer.process_audio_bytes(recording.complete,timestamp))
+        Thread(
+            target=audio_processer.process_audio_bytes,
+            args=(recording.complete, chunk.timestamp),
+            daemon=True,
+        ).start()
         del recordings[chunk.timestamp]
 
     return {

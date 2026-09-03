@@ -1,6 +1,7 @@
 fastapi
 pydantic
 uvicorn[standard]
+python-dotenv
 cryptography
 qrcode
 tink
