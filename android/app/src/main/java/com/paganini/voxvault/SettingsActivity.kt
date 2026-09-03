@@ -33,6 +33,7 @@ class SettingsActivity : AppCompatActivity() {
         val encryptionPublicKeyLayout = findViewById<TextInputLayout>(R.id.encryptionPublicKeyLayout)
         
         val saveButton = findViewById<Button>(R.id.saveButton)
+        val backButton = findViewById<Button>(R.id.backButton)
 
         lifecycleScope.launch {
             backendUrlEdit.setText(settingsManager.backendUrlFlow.first())
@@ -42,6 +43,10 @@ class SettingsActivity : AppCompatActivity() {
             encryptionPublicKeyEdit.setText(settingsManager.encryptionPublicKeyFlow.first())
             
             handleDeepLink(intent)
+        }
+
+        backButton.setOnClickListener {
+            navigateToMain()
         }
 
         saveButton.setOnClickListener {
@@ -90,9 +95,16 @@ class SettingsActivity : AppCompatActivity() {
                 settingsManager.updateMaxSilenceTime((maxSilenceSec * 1000).toLong())
                 settingsManager.updatePreBufferLength((preBufferSec * 1000).toLong())
                 settingsManager.updateEncryptionPublicKey(encryptionKey)
-                finish()
+                navigateToMain()
             }
         }
+    }
+
+    private fun navigateToMain() {
+        val intent = Intent(this, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        startActivity(intent)
+        finish()
     }
 
     override fun onNewIntent(intent: Intent) {

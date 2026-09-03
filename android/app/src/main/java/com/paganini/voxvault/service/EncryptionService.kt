@@ -17,23 +17,28 @@ import com.paganini.voxvault.AppConfig
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class EncryptionService(
     outputFile: File?
 ) : AutoCloseable {
 
     val symmetricKey: KeysetHandle
-    val encryptedOutputStream : OutputStream
+    var encryptedOutputStream: OutputStream
 
-    val publicKey : HybridEncrypt
+    private val streamingAead: StreamingAead
+    val publicKey: HybridEncrypt
 
     init {
         StreamingAeadConfig.register()
         HybridConfig.register()
 
 
-        val publicKeyBytes = Base64.decode(AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY,
-            Base64.DEFAULT)
+        val publicKeyBytes = Base64.decode(
+            AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY,
+            Base64.DEFAULT
+        )
 
         publicKey = createHybridEncrypt(publicKeyBytes)
 
@@ -41,7 +46,7 @@ class EncryptionService(
             KeyTemplates.get("AES128_GCM_HKDF_4KB")
         )
 
-        val streamingAead = symmetricKey.getPrimitive(
+        streamingAead = symmetricKey.getPrimitive(
             RegistryConfiguration.get(),
             StreamingAead::class.java
         )
@@ -54,11 +59,39 @@ class EncryptionService(
 
     }
 
-    override fun close() {
+    // Reusable buffer to avoid allocations in the high-frequency listening loop
+    private val reusableConversionBuffer = ByteBuffer.allocate(AppConfig.Audio.BUFFER_SIZE * 2)
+        .order(ByteOrder.LITTLE_ENDIAN)
 
+    fun encryptByteArray(data: ByteArray) {
+        encryptedOutputStream.write(data)
     }
 
-    fun getSerializedEncryptedSymmetricKey():String{
+    fun encryptShortBuffer(buffer: ShortArray) {
+        if (buffer.size == AppConfig.Audio.BUFFER_SIZE) {
+            reusableConversionBuffer.clear()
+            reusableConversionBuffer.asShortBuffer().put(buffer)
+            encryptedOutputStream.write(reusableConversionBuffer.array())
+        } else {
+            val byteBuffer = ByteBuffer.allocate(buffer.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+            byteBuffer.asShortBuffer().put(buffer)
+            encryptedOutputStream.write(byteBuffer.array())
+        }
+    }
+
+    fun update(newOutputFile: File?) {
+        encryptedOutputStream.close()
+        encryptedOutputStream = streamingAead.newEncryptingStream(
+            FileOutputStream(newOutputFile),
+            byteArrayOf()
+        )
+    }
+
+    override fun close() {
+        encryptedOutputStream.close()
+    }
+
+    fun getSerializedEncryptedSymmetricKey(): String {
         val serializedKey = TinkProtoKeysetFormat.serializeKeyset(
             symmetricKey,
             InsecureSecretKeyAccess.get()

@@ -206,10 +206,16 @@ code {
   background: #ffffff;
 }
 
-.qr svg {
+.qr svg,
+.qr img {
   display: block;
   width: min(260px, 100%);
   height: auto;
+}
+
+.qr-error {
+  margin: 0;
+  color: #8a2f2f;
 }
 
 @media (max-width: 760px) {

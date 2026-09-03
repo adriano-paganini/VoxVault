@@ -50,6 +50,14 @@ function clearInput(id) {
   element.textContent = "";
 }
 
+function showQrFetchError(target, status) {
+  target.replaceChildren();
+  const message = document.createElement("p");
+  message.className = "qr-error";
+  message.textContent = `QR code failed to load (${status}).`;
+  target.appendChild(message);
+}
+
 function permissionCommands(privateKeyPath) {
   return [
     `sudo chown root:root ${privateKeyPath}`,
@@ -74,15 +82,26 @@ async function renderQr(targetId, text) {
 
 async function renderPublicKeyQr(targetId, fallbackDeepLink) {
   const target = document.querySelector(`#${targetId}`);
-  const response = await fetch("/api/keys/qrcode", {cache: "no-store"});
+  target.replaceChildren();
 
-  if (response.ok) {
-    target.innerHTML = await response.text();
+  const image = document.createElement("img");
+  image.alt = "Public key QR code";
+
+  const loaded = new Promise((resolve) => {
+    image.addEventListener("load", () => resolve(true), {once: true});
+    image.addEventListener("error", () => resolve(false), {once: true});
+  });
+
+  image.src = `/api/keys/qrcode?t=${Date.now()}`;
+  target.appendChild(image);
+
+  if (await loaded) {
     return;
   }
 
   if (!fallbackDeepLink) {
-    throw await response.json();
+    showQrFetchError(target, "image error");
+    return;
   }
 
   await renderQr(targetId, fallbackDeepLink);

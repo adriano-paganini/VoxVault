@@ -1,5 +1,6 @@
 from io import BytesIO
 from json import dumps
+from os import getenv
 from urllib.parse import quote
 
 import qrcode
@@ -48,10 +49,18 @@ def public_key_intent_link(public_key: str):
     )
 
 
+def public_base_url():
+    base_url = getenv("VOXVAULT_PUBLIC_BASE_URL", "").strip()
+    return base_url.rstrip("/")
+
+
 def public_key_qr_link(request: Request, public_key: str):
-    return str(request.url_for("setup_deep_link")).split("?", 1)[0] + (
-        f"?key={quote(public_key, safe='')}"
-    )
+    base_url = public_base_url()
+
+    if not base_url:
+        return public_key_deep_link(public_key)
+
+    return f"{base_url}/setup?key={quote(public_key, safe='')}"
 
 
 def public_key_response(request: Request):
@@ -61,6 +70,7 @@ def public_key_response(request: Request):
         "privateKeyHostPath": private_key_host_path(),
         "publicKey": key,
         "publicKeyDeepLink": public_key_deep_link(key),
+        "publicKeyIntentLink": public_key_intent_link(key),
         "publicKeyQrLink": public_key_qr_link(request, key),
     }
 
@@ -112,6 +122,7 @@ async def key_status():
 async def create_keys(request: Request):
     keys = create_encryption_keys()
     keys["publicKeyDeepLink"] = public_key_deep_link(keys["publicKey"])
+    keys["publicKeyIntentLink"] = public_key_intent_link(keys["publicKey"])
     keys["publicKeyQrLink"] = public_key_qr_link(request, keys["publicKey"])
     return keys
 
