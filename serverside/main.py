@@ -1,6 +1,8 @@
 from io import BytesIO
 from json import dumps, loads
 from os import getenv
+from pathlib import Path
+import subprocess
 from urllib.parse import quote
 import base64
 
@@ -12,6 +14,7 @@ from encryption import (
     key_exists,
     private_key_host_path,
     private_key_path,
+    decrypt_data,
 )
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -26,6 +29,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 ShortInt = conint(ge=-32768, le=32767)
 upload_events = []
 SERVER_DEBUG_VERSION = "upload-debug-2026-09-03-1"
+DEBUG_AUDIO_DIR = Path(getenv("VOXVAULT_DEBUG_AUDIO_DIR", "debug_audio"))
+PCM_SAMPLE_RATE = 16000
+PCM_CHANNELS = 1
 
 class PingRequest(BaseModel):
     name: str
@@ -57,6 +63,35 @@ def model_to_json(model: BaseModel):
 def remember_upload_event(event):
     upload_events.insert(0, event)
     del upload_events[10:]
+
+
+def save_debug_mp3(pcm_bytes: bytes, timestamp: int, chunk_index: int) -> str:
+    DEBUG_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = DEBUG_AUDIO_DIR / f"{timestamp}_chunk_{chunk_index:03d}.mp3"
+
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "s16le",
+            "-ar",
+            str(PCM_SAMPLE_RATE),
+            "-ac",
+            str(PCM_CHANNELS),
+            "-i",
+            "pipe:0",
+            "-codec:a",
+            "libmp3lame",
+            str(output_path),
+        ],
+        input=pcm_bytes,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+    return str(output_path)
 
 
 def public_key_deep_link(public_key: str):
@@ -233,12 +268,21 @@ async def upload(chunk: UploadChunkRequest):
     decoded_encrypted_data = base64.b64decode(chunk.data)
     decoded_symmetric_encryption_key = base64.b64decode(chunk.encryptedSerializedSymmetricKey)
     # 1. decrypt the decoded_encrypted_data
-    #data = decrypt_data(decoded_encrypted_data, decoded_symmetric_encryption_key)
+    decrypted_pcm_bytes = decrypt_data(
+        decoded_encrypted_data,
+        decoded_symmetric_encryption_key,
+    )
+    debug_mp3_path = save_debug_mp3(
+        decrypted_pcm_bytes,
+        chunk.timestamp,
+        chunk.chunkIndex,
+    )
     #2. store the decrypted Data temporarily, until all chunks have been received.
     # some custom data-type ideally
     #3. if the custom-data-type is complete, put all chunks together
     #4. convert complete object to text and store it
     #5. extract voice-embeddings
     return {
-        "message": f"received : {len(chunk.data)}"
+        "message": f"received : {len(chunk.data)}",
+        "debugMp3Path": debug_mp3_path,
     }
