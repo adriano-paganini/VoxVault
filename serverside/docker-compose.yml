@@ -3,11 +3,11 @@ services:
     build: .
     image: voxvault-server:latest
     ports:
-      - "${VOXVAULT_PORT:-8000}:8000"
+      - "${VOXVAULT_PORT:-6100}:6100"
     environment:
-      VOXVAULT_PORT: 8000
+      VOXVAULT_PORT: 6100
       # Optional: set this to a URL reachable by your phone, for example:
-      # VOXVAULT_PUBLIC_BASE_URL: http://192.168.1.20:8000
+      # VOXVAULT_PUBLIC_BASE_URL: http://192.168.1.20:6100
       VOXVAULT_PUBLIC_BASE_URL: ${VOXVAULT_PUBLIC_BASE_URL:-}
       VOXVAULT_PRIVATE_KEY_PATH: /data/server-privatekey.key
       VOXVAULT_PRIVATE_KEY_HOST_PATH: /etc/voxvault/server-privatekey.key

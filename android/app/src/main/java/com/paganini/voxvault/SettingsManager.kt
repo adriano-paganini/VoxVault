@@ -24,7 +24,7 @@ class SettingsManager(private val context: Context) {
 
         // Default values corresponding to AppConfig
         const val DEFAULT_BACKEND_URL = ""
-        const val DEFAULT_BACKEND_PORT = "8000"
+        const val DEFAULT_BACKEND_PORT = "6100"
         const val DEFAULT_MAX_SILENCE_TIME = 10000L
         const val DEFAULT_PRE_BUFFER_LENGTH = 1000L
 
