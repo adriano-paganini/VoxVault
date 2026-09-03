@@ -53,6 +53,7 @@
               <button class="copy-button" data-copy-target="private-key-output" type="button" title="Copy private key">Copy</button>
               <pre id="private-key-output" class="key-output"></pre>
             </div>
+            <div id="private-key-qr" class="qr"></div>
           </article>
 
           <article class="panel key-card">
@@ -93,8 +94,19 @@
         <h2>Error</h2>
         <pre id="error-output"></pre>
       </section>
+
+      <section class="panel">
+        <div class="view-heading compact">
+          <div>
+            <h2>Upload Requests</h2>
+            <p>Latest validated requests received by <code>/upload</code>.</p>
+          </div>
+          <button id="refresh-uploads-button" class="secondary" type="button">Refresh</button>
+        </div>
+        <pre id="upload-output" class="upload-output">No uploads received.</pre>
+      </section>
     </main>
 
-    <script src="/static/app.js?v=3"></script>
+    <script src="/static/app.js?v=6"></script>
   </body>
 </html>

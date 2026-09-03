@@ -7,6 +7,8 @@ const publicKeySummary = document.querySelector("#public-key-summary");
 const publicKeyCard = document.querySelector("#public-key-card");
 const errorView = document.querySelector("#error-view");
 const errorOutput = document.querySelector("#error-output");
+const uploadOutput = document.querySelector("#upload-output");
+const refreshUploadsButton = document.querySelector("#refresh-uploads-button");
 
 let createdKeys = null;
 
@@ -50,6 +52,14 @@ function clearInput(id) {
   element.textContent = "";
 }
 
+function showQrFetchError(target, status) {
+  target.replaceChildren();
+  const message = document.createElement("p");
+  message.className = "qr-error";
+  message.textContent = `QR code failed to load (${status}).`;
+  target.appendChild(message);
+}
+
 function permissionCommands(privateKeyPath) {
   return [
     `sudo chown root:root ${privateKeyPath}`,
@@ -73,16 +83,10 @@ async function renderQr(targetId, text) {
 }
 
 async function renderPublicKeyQr(targetId, fallbackDeepLink) {
-  const target = document.querySelector(`#${targetId}`);
-  const response = await fetch("/api/keys/qrcode", {cache: "no-store"});
-
-  if (response.ok) {
-    target.innerHTML = await response.text();
-    return;
-  }
-
   if (!fallbackDeepLink) {
-    throw await response.json();
+    const target = document.querySelector(`#${targetId}`);
+    showQrFetchError(target, "image error");
+    return;
   }
 
   await renderQr(targetId, fallbackDeepLink);
@@ -113,6 +117,7 @@ async function revealCreatedKeys() {
   document.querySelector("#private-key-output").textContent = createdKeys.privateKey;
   document.querySelector("#created-public-key-output").textContent = createdKeys.publicKey;
 
+  await renderQr("private-key-qr", createdKeys.privateKey);
   await renderPublicKeyQr("created-public-key-qr", publicKeyQrLink(createdKeys));
 
   showOnly(createdKeysView);
@@ -121,12 +126,24 @@ async function revealCreatedKeys() {
 function hideCreatedKeys() {
   clearInput("private-key-output");
   clearInput("created-public-key-output");
+  clearElement("private-key-qr");
   clearElement("created-public-key-qr");
   showOnly(warningView);
 }
 
 function hidePublicKey() {
   showPublicKeySummary();
+}
+
+async function refreshUploads() {
+  const data = await requestJson("/api/uploads");
+
+  if (!data.uploads.length) {
+    uploadOutput.textContent = "No uploads received.";
+    return;
+  }
+
+  uploadOutput.textContent = JSON.stringify(data.uploads, null, 2);
 }
 
 document.querySelector("#create-keys-button").addEventListener("click", async () => {
@@ -166,6 +183,7 @@ document.querySelector("#display-public-key-button").addEventListener("click", a
 });
 
 document.querySelector("#hide-public-key-button").addEventListener("click", hidePublicKey);
+refreshUploadsButton.addEventListener("click", refreshUploads);
 
 document.querySelectorAll("[data-copy-target]").forEach((button) => {
   button.addEventListener("click", async () => {
@@ -185,6 +203,8 @@ document.querySelectorAll("[data-copy-target]").forEach((button) => {
 
 async function initialize() {
   try {
+    await refreshUploads();
+
     const status = await requestJson("/api/keys/status");
 
     if (status.keysExist) {
@@ -199,3 +219,4 @@ async function initialize() {
 }
 
 initialize();
+setInterval(refreshUploads, 2000);

@@ -16,6 +16,8 @@ class Chunker(
     }?.sortedBy { it.name } ?: emptyList()
 
     val totalChunks: Int = chunkFiles.size
+    val recordingDirPath: String = recordingDir.absolutePath
+    val chunkFileNames: List<String> = chunkFiles.map { it.name }
     private var currentChunkIndex: Int = 0
 
     fun hasNext(): Boolean = currentChunkIndex < totalChunks
@@ -39,6 +41,7 @@ class Chunker(
             timestamp = recording.timestamp,
             totalChunks = totalChunks,
             chunkIndex = currentChunkIndex++,
+            encryptedSerializedSymmetricKey= recording.encryptedSerializedSymmetricKey,
             data = shortData
         )
     }
