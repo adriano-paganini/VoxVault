@@ -8,6 +8,8 @@ import base64
 
 import qrcode
 import qrcode.image.svg
+
+from Recording import Recording
 from encryption import (
     create_encryption_keys,
     get_public_key,
@@ -28,6 +30,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 ShortInt = conint(ge=-32768, le=32767)
 upload_events = []
+recordings = {}
 SERVER_DEBUG_VERSION = "upload-debug-2026-09-03-1"
 DEBUG_AUDIO_DIR = Path(getenv("VOXVAULT_DEBUG_AUDIO_DIR", "debug_audio"))
 PCM_SAMPLE_RATE = 16000
@@ -265,18 +268,25 @@ async def upload(chunk: UploadChunkRequest):
     })
     print(f"Received upload: {upload_json}", flush=True)
 
-    decoded_encrypted_data = base64.b64decode(chunk.data)
-    decoded_symmetric_encryption_key = base64.b64decode(chunk.encryptedSerializedSymmetricKey)
-    # 1. decrypt the decoded_encrypted_data
-    decrypted_pcm_bytes = decrypt_data(
-        decoded_encrypted_data,
-        decoded_symmetric_encryption_key,
-    )
-    debug_mp3_path = save_debug_mp3(
-        decrypted_pcm_bytes,
-        chunk.timestamp,
-        chunk.chunkIndex,
-    )
+    recording = recordings.get(chunk.timestamp)
+    if recording is None:
+        recording = Recording(
+            chunk.timestamp,
+            chunk.totalChunks,
+            chunk.encryptedSerializedSymmetricKey,
+        )
+        recordings[chunk.timestamp] = recording
+
+    recording.add_chunk(chunk.chunkIndex, chunk.data)
+
+    if recording.stitch():
+        recording_audio = recording.complete
+        save_debug_mp3(
+            recording_audio,
+            chunk.timestamp,
+            chunk.chunkIndex,
+        )
+        del recordings[chunk.timestamp]
     #2. store the decrypted Data temporarily, until all chunks have been received.
     # some custom data-type ideally
     #3. if the custom-data-type is complete, put all chunks together
@@ -284,5 +294,4 @@ async def upload(chunk: UploadChunkRequest):
     #5. extract voice-embeddings
     return {
         "message": f"received : {len(chunk.data)}",
-        "debugMp3Path": debug_mp3_path,
     }

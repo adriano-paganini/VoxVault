@@ -135,14 +135,19 @@ def _load_hpke_private_keyset_handle():
 
     return cleartext_keyset_handle.from_keyset(keyset)
 
-def decrypt_data(decoded_encrypted_data, decoded_symmetric_encryption_key):
+def decrypt_symmetric_key(symmetric_key):
     hpke_handle = _load_hpke_private_keyset_handle()
     hybrid_decrypt = hpke_handle.primitive(hybrid.HybridDecrypt)
+
+    decoded_symmetric_encryption_key = base64.b64decode(symmetric_key)
 
     serialized_symmetric_keyset = hybrid_decrypt.decrypt(
         decoded_symmetric_encryption_key,
         b"",
     )
+    return serialized_symmetric_keyset
+
+def decrypt_data(decoded_encrypted_data, serialized_symmetric_keyset):
 
     symmetric_handle = cleartext_keyset_handle.read(
         BinaryKeysetReader(serialized_symmetric_keyset)
