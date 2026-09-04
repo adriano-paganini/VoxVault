@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from io import BytesIO
 from json import dumps, loads
 from os import getenv
@@ -14,6 +15,7 @@ load_dotenv()
 import audio_processer
 
 from Recording import Recording
+from db.database import initialize_database
 from encryption import (
     create_encryption_keys,
     get_public_key,
@@ -28,7 +30,14 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, conint
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_database()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 ShortInt = conint(ge=-32768, le=32767)

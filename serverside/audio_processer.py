@@ -34,6 +34,7 @@ class AudioProcessingResult:
         }
 
 
+
 def pcm_bytes_to_float32_mono(audio: bytes):
     import numpy as np
 
@@ -157,7 +158,6 @@ def write_debug_recording_mp3(audio: bytes, timestamp: int) -> str | None:
 
 
 def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
-    print(f"Processing recording {timestamp}: {len(audio)} PCM bytes", flush=True)
     debug_mp3_path = write_debug_recording_mp3(audio, timestamp)
 
     result = transcribe_with_whisperx(audio)
@@ -172,4 +172,6 @@ def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
         f"Processed recording {timestamp}: {len(processed.words)} words. CSV: {debug_csv_path}. MP3: {debug_mp3_path}",
         flush=True,
     )
+
     return processed
+
