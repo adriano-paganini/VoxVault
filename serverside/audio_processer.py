@@ -4,6 +4,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import db.models
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -32,7 +33,6 @@ class AudioProcessingResult:
             "language": self.language,
             "words": [asdict(word) for word in self.words],
         }
-
 
 
 def pcm_bytes_to_float32_mono(audio: bytes):
@@ -173,5 +173,95 @@ def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
         flush=True,
     )
 
+    chunk_audio, chunk_object, word_object = extract_chunks(audio, processed)
+
+    # extract text-embeddings
+
+    # extract audio-embeddings
+
     return processed
 
+
+def extract_chunks(audio: bytes, processed: AudioProcessingResult):
+    words = processed.words
+
+    if not words:
+        return [], [], []
+
+    chunks = []
+    word_objects = []
+
+    chunk_index = 0
+    current_speaker = words[0].speaker_label
+
+    current_chunk = db.models.TranscriptionChunk(
+        chunk_index=chunk_index,
+        start_ms=words[0].start_ms,
+    )
+
+    current_text = ""
+    current_word_count = 0
+    word_index = 0
+
+    for word in words:
+
+        # Speaker changed -> finish previous chunk first
+        if word.speaker_label != current_speaker:
+            current_chunk.text = current_text
+            current_chunk.word_count = current_word_count
+            current_chunk.end_ms = previous_word.end_ms
+
+            chunks.append(current_chunk)
+
+            # Start new chunk
+            chunk_index += 1
+            current_speaker = word.speaker_label
+
+            current_chunk = db.models.TranscriptionChunk(
+                chunk_index=chunk_index,
+                start_ms=word.start_ms,
+            )
+
+            current_text = ""
+            current_word_count = 0
+
+        # Add current word to current chunk
+        current_text += word.word
+        current_word_count += 1
+
+        word_object = db.models.TranscriptionWord(
+            word_index=word_index,
+            word=word.word,
+            start_ms=word.start_ms,
+            end_ms=word.end_ms,
+            raw_speaker_label=word.speaker_label,
+            confidence=word.confidence,
+            chunk=current_chunk,
+        )
+
+        word_objects.append(word_object)
+
+        word_index += 1
+        previous_word = word
+
+    # Finish final chunk
+    current_chunk.text = current_text
+    current_chunk.word_count = current_word_count
+    current_chunk.end_ms = previous_word.end_ms
+
+    chunks.append(current_chunk)
+
+    # PCM16 = 2 bytes per sample
+    bytes_per_ms = SAMPLE_RATE * CHANNELS * 2 / 1000
+
+    chunk_audio = []
+
+    for chunk in chunks:
+        starting_byte = int(chunk.start_ms * bytes_per_ms)
+        ending_byte = int(chunk.end_ms * bytes_per_ms)
+
+        chunk_audio.append(
+            audio[starting_byte:ending_byte]
+        )
+
+    return chunk_audio, chunks, word_objects
