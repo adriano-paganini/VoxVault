@@ -16,7 +16,7 @@ from sqlalchemy.orm import (
 )
 
 
-TEXT_EMBEDDING_DIM = 384
+TEXT_EMBEDDING_DIM = 192
 VOICE_EMBEDDING_DIM = 384
 
 

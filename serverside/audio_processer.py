@@ -3,11 +3,25 @@ import os
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import torch
 
 import db.models
 
+from sentence_transformers import SentenceTransformer
+from speechbrain.inference.speaker import EncoderClassifier
+
+speaker_model = EncoderClassifier.from_hparams(
+    source="speechbrain/spkrec-ecapa-voxceleb",
+    savedir="models/spkrec-ecapa-voxceleb",
+)
+
+text_embedding_model = SentenceTransformer(
+    "intfloat/multilingual-e5-small"
+)
+
 SAMPLE_RATE = 16000
 CHANNELS = 1
+MAX_WORDS_PER_CHUNK = 250
 DEBUG_AUDIO_DIR = Path(os.getenv("VOXVAULT_DEBUG_AUDIO_DIR", "debug_audio"))
 DEBUG_TRANSCRIPT_DIR = Path(os.getenv("VOXVAULT_DEBUG_TRANSCRIPT_DIR", "debug_transcripts"))
 
@@ -175,11 +189,48 @@ def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
 
     chunk_audio, chunk_object, word_object = extract_chunks(audio, processed)
 
-    # extract text-embeddings
-
-    # extract audio-embeddings
+    assign_text_embeddings(chunk_object)
+    assign_audio_embeddings(zip(chunk_object,chunk_audio))
 
     return processed
+
+
+
+def assign_audio_embeddings(chunk_data):
+    for chunk, audio in chunk_data:
+        waveform = pcm_bytes_to_float32_mono(audio)
+
+        waveform_tensor = torch.from_numpy(waveform).unsqueeze(0)
+
+        with torch.inference_mode():
+            embedding = speaker_model.encode_batch(waveform_tensor)
+
+        chunk.voice_embedding = (
+            embedding.squeeze()
+            .cpu()
+            .numpy()
+            .tolist()
+        )
+
+def assign_text_embeddings(chunks:list[db.models.TranscriptionChunk]):
+    texts = [
+        "passage: " + chunk.text for chunk in chunks
+    ]
+    embeddings = text_embedding_model.encode(
+        texts,
+        normalize_embeddings=True,
+    )
+
+    for chunk,embedding in zip(chunks, embeddings):
+        chunk.text_embedding = embedding.tolist()
+
+def create_query_embedding(query: str) -> list[float]:
+    embedding = text_embedding_model.encode(
+        "query: " + query,
+        normalize_embeddings=True,
+    )
+
+    return embedding.tolist()
 
 
 def extract_chunks(audio: bytes, processed: AudioProcessingResult):
@@ -206,10 +257,11 @@ def extract_chunks(audio: bytes, processed: AudioProcessingResult):
     for word in words:
 
         # Speaker changed -> finish previous chunk first
-        if word.speaker_label != current_speaker:
+        if word.speaker_label != current_speaker or word_index >= MAX_WORDS_PER_CHUNK:
             current_chunk.text = current_text
             current_chunk.word_count = current_word_count
             current_chunk.end_ms = previous_word.end_ms
+
 
             chunks.append(current_chunk)
 

@@ -4,3 +4,5 @@ whisperx
 # HUGGINGFACE READ API-TOKEN is required!
 pyannote.audio
 speechbrain
+sentence-transformers
+torchaudio
