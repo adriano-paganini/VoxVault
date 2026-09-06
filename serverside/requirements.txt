@@ -8,3 +8,11 @@ tink
 sqlalchemy
 psycopg[binary]
 pgvector
+whisperx
+# find at:
+# https://huggingface.co/pyannote/speaker-diarization-community-1
+# HUGGINGFACE READ API-TOKEN is required!
+pyannote.audio
+speechbrain
+sentence-transformers
+torchaudio

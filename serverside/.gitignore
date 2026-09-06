@@ -5,6 +5,4 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-debug_audio/
-debug_transcripts/
 *.key

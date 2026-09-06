@@ -1,29 +1,32 @@
-import csv
 import os
-import subprocess
 from dataclasses import asdict, dataclass
-from pathlib import Path
 import torch
+import db_interaction
 
 import db.models
 
 from sentence_transformers import SentenceTransformer
 from speechbrain.inference.speaker import EncoderClassifier
 
+device = os.getenv("WHISPERX_DEVICE")
+if not device:
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+
+
 speaker_model = EncoderClassifier.from_hparams(
     source="speechbrain/spkrec-ecapa-voxceleb",
     savedir="models/spkrec-ecapa-voxceleb",
+    run_opts={"device": device},
 )
 
 text_embedding_model = SentenceTransformer(
-    "intfloat/multilingual-e5-small"
+    "intfloat/multilingual-e5-small",
+    device=device,
 )
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
 MAX_WORDS_PER_CHUNK = 250
-DEBUG_AUDIO_DIR = Path(os.getenv("VOXVAULT_DEBUG_AUDIO_DIR", "debug_audio"))
-DEBUG_TRANSCRIPT_DIR = Path(os.getenv("VOXVAULT_DEBUG_TRANSCRIPT_DIR", "debug_transcripts"))
 
 
 @dataclass
@@ -33,7 +36,6 @@ class TranscriptWord:
     end_ms: int | None
     speaker_label: str | None
     confidence: float | None
-
 
 @dataclass
 class AudioProcessingResult:
@@ -48,26 +50,19 @@ class AudioProcessingResult:
             "words": [asdict(word) for word in self.words],
         }
 
-
 def pcm_bytes_to_float32_mono(audio: bytes):
     import numpy as np
 
     samples = np.frombuffer(audio, dtype="<i2")
     return samples.astype("float32") / 32768.0
 
-
 def transcribe_with_whisperx(audio: bytes) -> dict:
-    import torch
     import whisperx
-
-    device = os.getenv("WHISPERX_DEVICE")
-    if not device:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model_name = os.getenv("WHISPERX_MODEL", "small")
     compute_type = os.getenv(
         "WHISPERX_COMPUTE_TYPE",
-        "float16" if device == "cuda" else "int8",
+        "float16" if device == "cuda:0" else "int8",
     )
     batch_size = int(os.getenv("WHISPERX_BATCH_SIZE", "8"))
 
@@ -89,7 +84,7 @@ def transcribe_with_whisperx(audio: bytes) -> dict:
         return_char_alignments=False,
     )
 
-    hf_token = os.getenv("HUGGINGFACE_TOKEN")
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
     if hf_token:
         from whisperx.diarize import DiarizationPipeline
 
@@ -98,7 +93,6 @@ def transcribe_with_whisperx(audio: bytes) -> dict:
         result = whisperx.assign_word_speakers(diarize_segments, result)
 
     return result
-
 
 def result_to_words(result: dict) -> list[TranscriptWord]:
     words = []
@@ -120,70 +114,16 @@ def result_to_words(result: dict) -> list[TranscriptWord]:
 
     return words
 
-
-def write_debug_conversation_csv(result: AudioProcessingResult) -> str:
-    DEBUG_TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = DEBUG_TRANSCRIPT_DIR / f"{result.timestamp}_conversation.csv"
-
-    with output_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(
-            csv_file,
-            fieldnames=["start_ms", "end_ms", "speaker_label", "confidence", "word"],
-        )
-        writer.writeheader()
-        for word in result.words:
-            writer.writerow(asdict(word))
-
-    return str(output_path)
-
-
-def write_debug_recording_mp3(audio: bytes, timestamp: int) -> str | None:
-    DEBUG_AUDIO_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = DEBUG_AUDIO_DIR / f"{timestamp}_recording.mp3"
-
-    try:
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-f",
-                "s16le",
-                "-ar",
-                str(SAMPLE_RATE),
-                "-ac",
-                str(CHANNELS),
-                "-i",
-                "pipe:0",
-                "-codec:a",
-                "libmp3lame",
-                str(output_path),
-            ],
-            input=audio,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-    except (FileNotFoundError, subprocess.CalledProcessError) as error:
-        print(f"Could not write debug MP3 for recording {timestamp}: {error}", flush=True)
-        return None
-
-    print(f"Wrote debug MP3 for recording {timestamp}: {output_path}", flush=True)
-    return str(output_path)
-
-
 def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
-    debug_mp3_path = write_debug_recording_mp3(audio, timestamp)
-
     result = transcribe_with_whisperx(audio)
     processed = AudioProcessingResult(
         timestamp=timestamp,
         language=result.get("language"),
         words=result_to_words(result),
     )
-    debug_csv_path = write_debug_conversation_csv(processed)
 
     print(
-        f"Processed recording {timestamp}: {len(processed.words)} words. CSV: {debug_csv_path}. MP3: {debug_mp3_path}",
+        f"Processed recording {timestamp}: {len(processed.words)} words.",
         flush=True,
     )
 
@@ -192,9 +132,17 @@ def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
     assign_text_embeddings(chunk_object)
     assign_audio_embeddings(zip(chunk_object,chunk_audio))
 
+    full_recording = db.models.Recording(timestamp =timestamp,
+                                         language = result.get("language"),
+                                         chunks = chunk_object)
+
+    for chunk in chunk_object:
+        chunk.recording = full_recording
+
+
+    db_interaction.save_recording(full_recording)
+
     return processed
-
-
 
 def assign_audio_embeddings(chunk_data):
     for chunk, audio in chunk_data:
@@ -231,7 +179,6 @@ def create_query_embedding(query: str) -> list[float]:
     )
 
     return embedding.tolist()
-
 
 def extract_chunks(audio: bytes, processed: AudioProcessingResult):
     words = processed.words
@@ -278,7 +225,7 @@ def extract_chunks(audio: bytes, processed: AudioProcessingResult):
             current_word_count = 0
 
         # Add current word to current chunk
-        current_text += word.word
+        current_text += " " + word.word
         current_word_count += 1
 
         word_object = db.models.TranscriptionWord(

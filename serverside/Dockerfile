@@ -20,6 +20,10 @@ COPY *.py .
 COPY db ./db
 COPY static ./static
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 EXPOSE 6100
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "6100"]
