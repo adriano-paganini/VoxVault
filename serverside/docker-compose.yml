@@ -27,6 +27,16 @@ services:
       start_period: 60s
       retries: 3
 
+  reset-keys:
+    profiles: ["reset"]
+    image: voxvault-server:latest
+    pull_policy: never
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["rm", "-f", "--", "/data/server-privatekey.key"]
+    volumes:
+      - ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}:/data
+
   postgres:
     image: pgvector/pgvector:pg17
     environment:
