@@ -6,6 +6,7 @@ from sqlalchemy import (
     Double,
     ForeignKey,
     Integer,
+    JSON,
     Text,
 )
 from sqlalchemy.orm import (
@@ -65,6 +66,19 @@ class Person(Base):
     chunks: Mapped[list[TranscriptionChunk]] = relationship(
         back_populates="person"
     )
+
+
+class SetupState(Base):
+    __tablename__ = "setup_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stage: Mapped[str] = mapped_column(Text, default="device")
+    recording_timestamp: Mapped[int | None] = mapped_column(BigInteger)
+    received_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    person_id: Mapped[int | None] = mapped_column(ForeignKey("person.id"))
+    error: Mapped[str | None] = mapped_column(Text)
+    history: Mapped[list[dict]] = mapped_column(JSON, default=list)
 
 
 class TranscriptionChunk(Base):

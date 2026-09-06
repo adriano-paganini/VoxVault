@@ -1,32 +1,40 @@
 import os
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 import torch
 import db_interaction
 
 import db.models
-
-from sentence_transformers import SentenceTransformer
-from speechbrain.inference.speaker import EncoderClassifier
 
 device = os.getenv("WHISPERX_DEVICE")
 if not device:
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
-speaker_model = EncoderClassifier.from_hparams(
-    source="speechbrain/spkrec-ecapa-voxceleb",
-    savedir="models/spkrec-ecapa-voxceleb",
-    run_opts={"device": device},
-)
+@lru_cache(maxsize=1)
+def get_speaker_model():
+    from speechbrain.inference.speaker import EncoderClassifier
 
-text_embedding_model = SentenceTransformer(
-    "intfloat/multilingual-e5-small",
-    device=device,
-)
+    return EncoderClassifier.from_hparams(
+        source="speechbrain/spkrec-ecapa-voxceleb",
+        savedir="models/spkrec-ecapa-voxceleb",
+        run_opts={"device": device},
+    )
+
+
+@lru_cache(maxsize=1)
+def get_text_embedding_model():
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer("intfloat/multilingual-e5-small", device=device)
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
 MAX_WORDS_PER_CHUNK = 250
+
+
+class EnrollmentError(ValueError):
+    pass
 
 
 @dataclass
@@ -56,7 +64,7 @@ def pcm_bytes_to_float32_mono(audio: bytes):
     samples = np.frombuffer(audio, dtype="<i2")
     return samples.astype("float32") / 32768.0
 
-def transcribe_with_whisperx(audio: bytes) -> dict:
+def transcribe_with_whisperx(audio: bytes, progress, enrollment=False) -> dict:
     import whisperx
 
     model_name = os.getenv("WHISPERX_MODEL", "small")
@@ -68,9 +76,14 @@ def transcribe_with_whisperx(audio: bytes) -> dict:
 
     waveform = pcm_bytes_to_float32_mono(audio)
 
-    model = whisperx.load_model(model_name, device, compute_type=compute_type)
+    progress("transcribing", "Loading the speech model and transcribing your recording.")
+    model = whisperx.load_model(
+        model_name, device, compute_type=compute_type,
+        language="en" if enrollment else None,
+    )
     result = model.transcribe(waveform, batch_size=batch_size)
 
+    progress("aligning", "Matching the spoken words to the audio.")
     align_model, metadata = whisperx.load_align_model(
         language_code=result["language"],
         device=device,
@@ -85,7 +98,7 @@ def transcribe_with_whisperx(audio: bytes) -> dict:
     )
 
     hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
-    if hf_token:
+    if hf_token and not enrollment:
         from whisperx.diarize import DiarizationPipeline
 
         diarize_model = DiarizationPipeline(token=hf_token, device=device)
@@ -114,8 +127,15 @@ def result_to_words(result: dict) -> list[TranscriptWord]:
 
     return words
 
-def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
-    result = transcribe_with_whisperx(audio)
+def process_audio_bytes(audio: bytes, timestamp: int, progress=None, enrollment=False) -> AudioProcessingResult:
+    progress = progress or (lambda stage, message: None)
+    progress("validating", "Checking the recording before processing.")
+    if not audio or len(audio) % 2:
+        raise EnrollmentError("The recording contains invalid audio. Please record the passage again.")
+    if enrollment and not 30 <= len(audio) / (SAMPLE_RATE * CHANNELS * 2) <= 180:
+        raise EnrollmentError("Please read the full passage in one recording lasting 30 seconds to 3 minutes.")
+
+    result = transcribe_with_whisperx(audio, progress, enrollment=enrollment)
     processed = AudioProcessingResult(
         timestamp=timestamp,
         language=result.get("language"),
@@ -129,7 +149,12 @@ def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
 
     chunk_audio, chunk_object, word_object = extract_chunks(audio, processed)
 
+    if enrollment and sum(chunk.word_count for chunk in chunk_object) < 50:
+        raise EnrollmentError("Too little clear speech was detected. Read the full passage again in a quiet room.")
+
+    progress("text_embedding", "Creating the transcript embeddings.")
     assign_text_embeddings(chunk_object)
+    progress("voice_embedding", "Loading the voice model and creating your voice embedding.")
     assign_audio_embeddings(zip(chunk_object,chunk_audio))
 
     full_recording = db.models.Recording(timestamp =timestamp,
@@ -140,7 +165,28 @@ def process_audio_bytes(audio: bytes, timestamp: int) -> AudioProcessingResult:
         chunk.recording = full_recording
 
 
-    db_interaction.save_recording(full_recording)
+    person = None
+    if enrollment:
+        import numpy as np
+
+        embedding = np.average(
+            [chunk.voice_embedding for chunk in chunk_object],
+            axis=0,
+            weights=[chunk.word_count for chunk in chunk_object],
+        )
+        norm = np.linalg.norm(embedding)
+        if not np.isfinite(embedding).all() or norm == 0:
+            raise EnrollmentError("A voice profile could not be created. Please record the passage again.")
+        person = db.models.Person(
+            name="Me",
+            voice_embedding=(embedding / norm).tolist(),
+            voice_embedding_word_count=sum(chunk.word_count for chunk in chunk_object),
+        )
+        for chunk in chunk_object:
+            chunk.person = person
+
+    progress("saving", "Saving your recording and voice profile." if enrollment else "Saving your recording.")
+    db_interaction.save_recording(full_recording, person=person)
 
     return processed
 
@@ -148,10 +194,10 @@ def assign_audio_embeddings(chunk_data):
     for chunk, audio in chunk_data:
         waveform = pcm_bytes_to_float32_mono(audio)
 
-        waveform_tensor = torch.from_numpy(waveform).unsqueeze(0)
+        waveform_tensor = torch.from_numpy(waveform).unsqueeze(0).to(device)
 
         with torch.inference_mode():
-            embedding = speaker_model.encode_batch(waveform_tensor)
+            embedding = get_speaker_model().encode_batch(waveform_tensor)
 
         chunk.voice_embedding = (
             embedding.squeeze()
@@ -161,10 +207,12 @@ def assign_audio_embeddings(chunk_data):
         )
 
 def assign_text_embeddings(chunks:list[db.models.TranscriptionChunk]):
+    if not chunks:
+        return
     texts = [
         "passage: " + chunk.text for chunk in chunks
     ]
-    embeddings = text_embedding_model.encode(
+    embeddings = get_text_embedding_model().encode(
         texts,
         normalize_embeddings=True,
     )
@@ -173,7 +221,7 @@ def assign_text_embeddings(chunks:list[db.models.TranscriptionChunk]):
         chunk.text_embedding = embedding.tolist()
 
 def create_query_embedding(query: str) -> list[float]:
-    embedding = text_embedding_model.encode(
+    embedding = get_text_embedding_model().encode(
         "query: " + query,
         normalize_embeddings=True,
     )
@@ -181,7 +229,9 @@ def create_query_embedding(query: str) -> list[float]:
     return embedding.tolist()
 
 def extract_chunks(audio: bytes, processed: AudioProcessingResult):
-    words = processed.words
+    words = [word for word in processed.words
+             if word.start_ms is not None and word.end_ms is not None
+             and 0 <= word.start_ms < word.end_ms <= len(audio) * 1000 / (SAMPLE_RATE * CHANNELS * 2)]
 
     if not words:
         return [], [], []
@@ -204,7 +254,7 @@ def extract_chunks(audio: bytes, processed: AudioProcessingResult):
     for word in words:
 
         # Speaker changed -> finish previous chunk first
-        if word.speaker_label != current_speaker or word_index >= MAX_WORDS_PER_CHUNK:
+        if word.speaker_label != current_speaker or current_word_count >= MAX_WORDS_PER_CHUNK:
             current_chunk.text = current_text
             current_chunk.word_count = current_word_count
             current_chunk.end_ms = previous_word.end_ms

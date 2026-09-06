@@ -9,13 +9,23 @@ services:
     environment:
       VOXVAULT_PORT: 6100
       VOXVAULT_PRIVATE_KEY_PATH: /data/server-privatekey.key
-      VOXVAULT_PRIVATE_KEY_HOST_PATH: /etc/voxvault/server-privatekey.key
+      VOXVAULT_PRIVATE_KEY_HOST_PATH: ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}/server-privatekey.key
+      VOXVAULT_PUBLIC_URL: ${VOXVAULT_PUBLIC_URL:-}
       DATABASE_URL: postgresql+psycopg://voxvault:voxvault@postgres:5432/voxvault
+      HF_HOME: /app/models/huggingface
+      TORCH_HOME: /app/models/torch
     volumes:
       - ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}:/data
+      - voxvault-models:/app/models
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6100/api/setup/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   postgres:
     image: pgvector/pgvector:pg17
@@ -35,3 +45,4 @@ services:
 
 volumes:
   voxvault-postgres:
+  voxvault-models:
