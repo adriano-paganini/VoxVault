@@ -21,6 +21,7 @@ class SettingsManager(private val context: Context) {
         val PRE_BUFFER_LENGTH = longPreferencesKey("pre_buffer_length")
 
         val ENCRYPTION_PUBLIC_KEY = stringPreferencesKey("encryption_public_key")
+        val SORT_ORDER = stringPreferencesKey("sort_order")
 
         // Default values corresponding to AppConfig
         const val DEFAULT_BACKEND_URL = ""
@@ -51,6 +52,10 @@ class SettingsManager(private val context: Context) {
         preferences[ENCRYPTION_PUBLIC_KEY] ?: DEFAULT_ENCRYPTION_PUBLIC_KEY
     }
 
+    val sortOrderFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[SORT_ORDER] ?: "DATE"
+    }
+
     suspend fun updateBackendUrl(url: String) {
         context.dataStore.edit { preferences ->
             preferences[BACKEND_URL] = url
@@ -78,6 +83,12 @@ class SettingsManager(private val context: Context) {
     suspend fun updateEncryptionPublicKey(key:String){
         context.dataStore.edit{ preferences ->
             preferences[ENCRYPTION_PUBLIC_KEY] = key
+        }
+    }
+
+    suspend fun updateSortOrder(order: String) {
+        context.dataStore.edit { preferences ->
+            preferences[SORT_ORDER] = order
         }
     }
 }
