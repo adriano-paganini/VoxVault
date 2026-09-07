@@ -321,7 +321,7 @@ def _lock_persons(session, person_ids):
     ids = sorted({person_id for person_id in person_ids if person_id is not None})
     if not ids:
         return {}
-    # Every assignment locks its chunk first, then the affected people in ID order.
+    # Chunk mutations lock the chunk first, then affected people in ID order.
     people = session.execute(
         select(Person).where(Person.id.in_(ids)).order_by(Person.id).with_for_update()
     ).scalars().all()
@@ -381,3 +381,14 @@ def assign_person(chunk_id, person_id):
             _require_speech(chunk)
         people = _lock_persons(session, [chunk.person_id, person_id])
         return _assign_in_session(session, chunk, people, person_id)
+
+
+def delete_chunk(chunk_id):
+    with SessionLocal.begin() as session:
+        chunk = _get_chunk(session, chunk_id, lock=True)
+        people = _lock_persons(session, [chunk.person_id])
+        # Keep the recording timestamp so re-uploading cannot recreate deleted speech.
+        session.delete(chunk)
+        session.flush()
+        for person in people.values():
+            _recompute_person(session, person)

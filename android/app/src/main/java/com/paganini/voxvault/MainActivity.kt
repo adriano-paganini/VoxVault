@@ -3,8 +3,6 @@ package com.paganini.voxvault
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
-import android.graphics.Color
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -12,16 +10,19 @@ import android.widget.Button
 import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.Toast
-import android.widget.ToggleButton
+import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.TooltipCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.children
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.button.MaterialButtonToggleGroup
 import com.paganini.voxvault.viewModel.MainViewModel
 import com.paganini.voxvault.dataClass.Recording
 import com.paganini.voxvault.service.ListeningService
@@ -79,25 +80,26 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStop() {
         super.onStop()
+        currentService?.speakingListener = null
+        currentService?.onRecordingCompleted = null
         viewModel.unbindService()
     }
     // endregion
 
     // region Service Logic
     private fun setupServiceObservation() {
-        val listeningToggleButton = findViewById<ToggleButton>(R.id.listeningToggle)
-        val mainView = findViewById<View>(R.id.main)
+        val listeningToggleButton = findViewById<MaterialButton>(R.id.listeningToggle)
 
         viewModel.listeningService.observe(this) { service ->
             currentService = service
             if (service != null) {
                 // Initial Sync
-                syncUIWithService(service, listeningToggleButton, mainView)
+                syncUIWithService(service, listeningToggleButton)
 
                 // Live Updates
                 service.speakingListener = {
                     runOnUiThread {
-                        syncUIWithService(service, listeningToggleButton, mainView)
+                        syncUIWithService(service, listeningToggleButton)
                     }
                 }
                 
@@ -161,21 +163,31 @@ class MainActivity : AppCompatActivity() {
     private fun setupRecordingObservation() {
         viewModel.recordings.observe(this) { recordings ->
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+            val existing = parent.children.associateBy { (it.tag as Recording).name }
             parent.removeAllViews()
             displayedRecordings.clear()
             recordings.forEach { r ->
-                addToScrollableList(r)
+                val row = existing[r.name]
+                if (row == null) addToScrollableList(r) else {
+                    displayedRecordings[r.name] = r
+                    parent.addView(row)
+                }
             }
+            findViewById<MaterialButtonToggleGroup>(R.id.sortGroup).check(
+                if (viewModel.currentSortOrder == MainViewModel.SortOrder.DATE) R.id.sortByDate else R.id.sortByDuration
+            )
             updateSelectAllButtonText()
         }
     }
 
-    private fun syncUIWithService(service: ListeningService, toggle: ToggleButton, root: View) {
-        toggle.isChecked = service.isListening
-        val color = AppConfig.UI.getStateColor(service.isListening, service.sharedSpeaking)
-
-        root.setBackgroundColor(Color.TRANSPARENT)
-        toggle.backgroundTintList = ColorStateList.valueOf(color)
+    private fun syncUIWithService(service: ListeningService, toggle: MaterialButton) {
+        toggle.setText(if (service.isListening) R.string.listening_on else R.string.listening_off)
+        toggle.setIconResource(if (service.isListening) android.R.drawable.ic_media_pause else android.R.drawable.ic_btn_speak_now)
+        findViewById<TextView>(R.id.listeningStatus).setText(when {
+            !service.isListening -> R.string.listening_idle
+            service.sharedSpeaking != 0 -> R.string.speech_active
+            else -> R.string.listening_active
+        })
     }
 
     private fun startListeningService() {
@@ -194,10 +206,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupClickListeners() {
-        val listeningToggle = findViewById<ToggleButton>(R.id.listeningToggle)
+        for (id in listOf(R.id.settingsButton, R.id.uploadButton, R.id.deleteButton)) {
+            val button = findViewById<View>(id)
+            TooltipCompat.setTooltipText(button, button.contentDescription)
+        }
+        val listeningToggle = findViewById<MaterialButton>(R.id.listeningToggle)
         listeningToggle.setOnClickListener {
-            listeningToggle.isChecked = false
-            if (AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY.isEmpty()){
+            if (!hasCriticalPermissions()) {
+                requestAppPermissions()
+                return@setOnClickListener
+            }
+            if (currentService?.isListening != true && AppConfig.Encryption.ENCRYPTION_PUBLIC_KEY.isEmpty()){
                 Toast.makeText(
                     this@MainActivity,
                     "Please setup the public encryption Key before recording!",
@@ -205,11 +224,18 @@ class MainActivity : AppCompatActivity() {
                 ).show()
                 return@setOnClickListener
             }
-            currentService?.toggle()
+            currentService?.let {
+                it.toggle()
+                syncUIWithService(it, listeningToggle)
+            }
         }
 
         findViewById<View>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        findViewById<View>(R.id.archiveButton).setOnClickListener {
+            startActivity(Intent(this, ExplorerActivity::class.java))
         }
 
         findViewById<Button>(R.id.sortByDate).setOnClickListener {
@@ -220,22 +246,22 @@ class MainActivity : AppCompatActivity() {
             viewModel.setSortOrder(MainViewModel.SortOrder.DURATION)
         }
 
-        findViewById<Button>(R.id.selectAll).setOnClickListener {
+        findViewById<CheckBox>(R.id.selectAll).setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
             val anyUnchecked = parent.children.any { child ->
-                !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
+                child.findViewById<CheckBox>(R.id.recordingCheckbox).let { it.isEnabled && !it.isChecked }
             }
 
             parent.children.forEach { child ->
-                child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked = anyUnchecked
+                child.findViewById<CheckBox>(R.id.recordingCheckbox).let { if (it.isEnabled) it.isChecked = anyUnchecked }
             }
             updateSelectAllButtonText()
         }
 
-        findViewById<Button>(R.id.deleteButton).setOnClickListener {
+        findViewById<View>(R.id.deleteButton).setOnClickListener {
             val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
             val toDelete = parent.children.filter { child ->
-                child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
+                child.findViewById<CheckBox>(R.id.recordingCheckbox).let { it.isEnabled && it.isChecked }
             }.toList()
 
             if (toDelete.isEmpty()){
@@ -274,7 +300,7 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
 
-        findViewById<Button>(R.id.uploadButton).setOnClickListener {
+        findViewById<View>(R.id.uploadButton).setOnClickListener {
             if (AppConfig.Web.BACKEND_ADDRESS.isEmpty()) {
                 Toast.makeText(
                     this@MainActivity,
@@ -286,7 +312,7 @@ class MainActivity : AppCompatActivity() {
             val selectedRecordingViews =
                 findViewById<LinearLayout>(R.id.recordingLinearLayout).children.filter {
                     val checkbox = it.findViewById<CheckBox>(R.id.recordingCheckbox)
-                    checkbox.isChecked
+                    checkbox.isEnabled && checkbox.isChecked
                 }.toList()
 
             if (selectedRecordingViews.isEmpty()) {
@@ -299,6 +325,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             for (recView in selectedRecordingViews) {
+                recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled = false
+                updateSelectAllButtonText()
                 lifecycleScope.launch(Dispatchers.IO) {
                     val recording: Recording = recView.tag as Recording
                     val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
@@ -366,17 +394,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateSelectAllButtonText() {
         val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
-        val selectAllButton = findViewById<Button>(R.id.selectAll)
-
-        val anyUnchecked = parent.children.any { child ->
-            !child.findViewById<CheckBox>(R.id.recordingCheckbox).isChecked
+        val available = parent.children.map { it.findViewById<CheckBox>(R.id.recordingCheckbox) }
+            .filter { it.isEnabled }.toList()
+        val selected = available.count { it.isChecked }
+        findViewById<CheckBox>(R.id.selectAll).apply {
+            isEnabled = available.isNotEmpty()
+            isChecked = available.isNotEmpty() && selected == available.size
+            text = if (selected > 0) getString(R.string.selected_recordings, selected) else getString(R.string.select_all)
         }
-
-        if (anyUnchecked || parent.children.none()) {
-            selectAllButton.setText(R.string.select_all)
-        } else {
-            selectAllButton.setText(R.string.deselect_all)
+        for (id in listOf(R.id.uploadButton, R.id.deleteButton)) findViewById<View>(id).apply {
+            isEnabled = selected > 0
+            alpha = if (isEnabled) 1f else 0.35f
         }
+        findViewById<View>(R.id.emptyRecordings).visibility = if (parent.childCount == 0) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.recordingSummary).text = getString(
+            R.string.recording_summary, parent.childCount, formatDuration(displayedRecordings.values.sumOf { it.duration })
+        )
     }
     // endregion
 
@@ -386,8 +419,6 @@ class MainActivity : AppCompatActivity() {
     ) { _ ->
         if (hasCriticalPermissions()) {
             startListeningService()
-        } else {
-            finish() // App cannot function without basic permissions
         }
     }
 

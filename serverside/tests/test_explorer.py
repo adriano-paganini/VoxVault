@@ -11,6 +11,7 @@ import numpy as np
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, func, select, text
 from sqlalchemy.ext.compiler import compiles, deregister
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.sql.elements import BinaryExpression
 
@@ -210,6 +211,58 @@ class ExplorerTests(unittest.TestCase):
         self.assert_profile(result["person"]["id"], vector(3, 4), 9)
         with self.sessions() as session:
             self.assertEqual(session.get(TranscriptionChunk, chunk_id).person_id, result["person"]["id"])
+
+    def test_delete_removes_words_and_recomputes_profile(self):
+        person_id = self.person()
+        recording_id = self.recording()
+        removed = self.chunk(recording_id=recording_id, voice=vector(2, 0), words=1,
+                             confidences=[(0, "hello", 0.9)])
+        retained = self.chunk(recording_id=recording_id, chunk_index=1,
+                              voice=vector(0, 4), words=3,
+                              confidences=[(0, "there", 0.8)])
+        self.assign(removed, person_id)
+        self.assign(retained, person_id)
+        response = self.client.delete(f"/api/explorer/chunks/{removed}")
+        self.assertEqual(response.status_code, 204, response.text)
+        self.assertEqual(response.content, b"")
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assert_profile(person_id, vector(0, 4), 3)
+        with self.sessions() as session:
+            self.assertIsNone(session.get(TranscriptionChunk, removed))
+            self.assertEqual(session.scalars(select(TranscriptionWord.chunk_id)).all(), [retained])
+            self.assertIsNotNone(session.get(Recording, recording_id))
+        self.assertEqual(self.get("chunks")["total"], 1)
+        self.assertEqual(self.get(f"persons/{person_id}/chunks")["total"], 1)
+        self.assertEqual(self.get(f"persons/{person_id}")["wordCount"], 3)
+        self.assertEqual(self.client.get(f"/api/explorer/chunks/{removed}").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/explorer/chunks/{removed}").status_code, 404)
+
+    def test_delete_last_sample_keeps_person_and_clears_profile(self):
+        person_id = self.person()
+        chunk_id = self.chunk(words=3)
+        self.assign(chunk_id, person_id)
+        self.assertEqual(self.client.delete(f"/api/explorer/chunks/{chunk_id}").status_code, 204)
+        self.assert_profile(person_id, None, 0)
+        person = self.get(f"persons/{person_id}")
+        self.assertEqual((person["chunkCount"], person["recordingCount"], person["wordCount"]), (0, 0, 0))
+        self.assertFalse(person["hasVoiceEmbedding"])
+
+    def test_delete_unassigned_chunk_without_usable_embedding(self):
+        chunk_id = self.chunk(voice=vector(0, 0))
+        self.assertEqual(self.client.delete(f"/api/explorer/chunks/{chunk_id}").status_code, 204)
+        self.assertEqual(self.get("chunks")["total"], 0)
+        self.assertEqual(self.client.delete("/api/explorer/chunks/99999").status_code, 404)
+
+    def test_delete_rolls_back_words_and_chunk_when_profile_update_fails(self):
+        person_id = self.person()
+        chunk_id = self.chunk(confidences=[(0, "hello", 0.9)])
+        self.assign(chunk_id, person_id)
+        with patch.object(explorer_service, "_recompute_person", side_effect=SQLAlchemyError("failed")):
+            response = self.client.delete(f"/api/explorer/chunks/{chunk_id}")
+        self.assertEqual(response.status_code, 503, response.text)
+        self.assert_profile(person_id, vector(), 2)
+        with self.sessions() as session:
+            self.assertEqual(len(session.get(TranscriptionChunk, chunk_id).words), 1)
 
     def test_invalid_combined_profile_rolls_back_reassignment(self):
         first, second = self.person("First"), self.person("Second")

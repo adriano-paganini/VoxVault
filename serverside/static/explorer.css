@@ -1,4 +1,14 @@
 .explorer { background: #f7f9fa; }
+.explorer.in-app .explorer-heading { display: none; }
+.explorer.in-app .explorer-shell { padding-top: 0; }
+.explorer button { max-width: 100%; overflow-wrap: anywhere; }
+.explorer button img { flex-shrink: 0; }
+.explorer .danger { background: #b3343d; border-color: #b3343d; color: #fff; }
+.explorer .danger-icon { border-color: #e0b9bd; background: #fff5f5; }
+#delete-confirmation { width: min(440px, calc(100% - 32px)); border: 1px solid #bdc9ce; border-radius: 8px; padding: 24px; color: #20292e; }
+#delete-confirmation::backdrop { background: #15282f88; }
+#delete-confirmation h2 { font-size: 20px; }
+#delete-confirmation .inline-actions { justify-content: flex-end; }
 .explorer-shell { width: min(1360px, calc(100% - 64px)); padding: 28px 0; }
 .explorer-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
 .explorer-heading h1 { font-size: 30px; }
@@ -71,7 +81,7 @@ body:has(#inspector[open]) { overflow: hidden; }
 .inspector-heading h2 { margin: 0; font-size: 21px; overflow-wrap: anywhere; }
 .inspector-heading .eyebrow { margin-bottom: 5px; font-size: 10px; }
 .inspector-body { padding: 0 24px 24px; }
-.operation-status { color: #286345; font-size: 13px; margin: 12px 0; }
+.operation-status { color: #286345; font-size: 13px; margin: 12px 0; overflow-wrap: anywhere; }
 .operation-status:empty { display: none; }
 .selected-chunk { padding: 20px 0; border-bottom: 1px solid #dce2e4; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -125,6 +135,13 @@ body:has(#inspector[open]) { overflow: hidden; }
   .chunk-card { padding: 16px; }
 }
 @media (max-width: 600px) {
+  .explorer button, .explorer .compact { min-height: 48px; }
+  .explorer .icon-button { width: 48px; height: 48px; flex-basis: 48px; }
+  .explorer input, .explorer select { min-height: 48px; font-size: 16px; }
+  .search-form > button { width: 48px; }
+  .explorer .compact-pagination button { width: 44px !important; height: 44px !important; min-height: 44px !important; flex-basis: 44px !important; }
+  .known-heading { flex-wrap: wrap; }
+  .chunk-bottom .inline-actions { gap: 6px; }
   .explorer-heading h1 { font-size: 27px; }
   .confidence-legend { row-gap: 8px; }
   .confidence-legend > span:first-child { flex-basis: 100%; }

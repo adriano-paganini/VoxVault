@@ -11,6 +11,8 @@
     source: "chunk", scope: "other", busy: false,
   };
   const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0 };
+  let pendingDeletion = null;
+  if (new URLSearchParams(location.search).get("app") === "1") document.body.classList.add("in-app");
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -162,7 +164,7 @@
     bottom.append(metadata(chunk));
     const actions = element("div", "inline-actions");
     if (inspect) {
-      const inspectButton = button("Inspect Voice Embedding", "audio-lines", () => inspectChunk(chunk.id, { retainPerson: $("#inspector").open }));
+      const inspectButton = button("Inspect voice", "audio-lines", () => inspectChunk(chunk.id, { retainPerson: $("#inspector").open }));
       inspectButton.disabled = !chunk.hasVoiceEmbedding;
       if (!chunk.hasVoiceEmbedding) inspectButton.title = "No voice embedding is available for this chunk";
       actions.append(inspectButton);
@@ -176,11 +178,18 @@
       } else {
         const assignment = button(chunk.personId == null ? "Assign" : "Reassign", "check", () => assignChunk(chunk.id, state.person.id), "compact");
         assignment.dataset.mutation = "";
+        assignment.dataset.unavailable = String(!chunk.hasVoiceEmbedding);
         assignment.disabled = state.busy || !chunk.hasVoiceEmbedding;
         assignment.title = chunk.personId == null ? `Assign to ${personName(state.person)}` : `Move from ${ownerName(chunk)} to ${personName(state.person)}`;
         actions.append(assignment);
       }
     }
+    const remove = button("", "trash-2", () => confirmDeletion(chunk), "icon-button secondary danger-icon");
+    remove.title = `Delete chunk #${chunk.id}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.dataset.mutation = "";
+    remove.disabled = state.busy;
+    actions.append(remove);
     bottom.append(actions);
     card.append(bottom);
     return card;
@@ -469,9 +478,12 @@
   async function mutate(callback, message) {
     if (state.busy) return;
     state.busy = true;
-    clearError(true);
-    $("#inspector-status").textContent = "Saving changes...";
-    $("#inspector").querySelectorAll("button, input, select").forEach(node => {
+    const inInspector = $("#inspector").open;
+    const status = $(inInspector ? "#inspector-status" : "#page-status");
+    for (const key of Object.keys(epochs)) ++epochs[key];
+    clearError(inInspector);
+    status.textContent = "Saving changes...";
+    document.querySelectorAll("button, input, select").forEach(node => {
       if (node.id !== "close-inspector") {
         node.dataset.preMutationDisabled = String(node.disabled);
         node.disabled = true;
@@ -482,22 +494,49 @@
       await callback();
       saved = true;
       await refreshAfterMutation();
-      $("#inspector-status").textContent = message;
+      status.textContent = message;
     } catch (error) {
-      $("#inspector-status").textContent = saved ? "Changes saved. Some archive data could not be refreshed." : "";
-      showError(error, true);
+      status.textContent = saved ? "Changes saved. Some archive data could not be refreshed." : "";
+      showError(error, inInspector);
     } finally {
       state.busy = false;
-      $("#inspector").querySelectorAll("[data-pre-mutation-disabled]").forEach(node => {
+      document.querySelectorAll("[data-pre-mutation-disabled]").forEach(node => {
         node.disabled = node.dataset.preMutationDisabled === "true";
         delete node.dataset.preMutationDisabled;
       });
       renderSelectedChunk();
       renderProfile();
       renderComparison();
-      $("#candidate-results").querySelectorAll("[data-mutation]").forEach(node => { node.disabled = false; });
+      document.querySelectorAll(".chunk-list [data-mutation], #known-chunk [data-mutation]").forEach(node => {
+        node.disabled = node.dataset.unavailable === "true";
+      });
+      $("#search-submit").disabled = false;
     }
   }
+
+  function confirmDeletion(chunk) {
+    if (state.busy) return;
+    pendingDeletion = chunk.id;
+    $("#delete-title").textContent = `Delete chunk #${chunk.id}?`;
+    $("#delete-description").textContent = "This permanently removes the transcript, word timings, and embeddings for this chunk. Any assigned person's voice profile will be recalculated from their remaining chunks.";
+    $("#delete-confirmation").returnValue = "cancel";
+    $("#delete-confirmation").showModal();
+  }
+
+  $("#delete-confirmation").addEventListener("close", () => {
+    const id = pendingDeletion;
+    pendingDeletion = null;
+    if ($("#delete-confirmation").returnValue !== "delete" || id == null) return;
+    mutate(async () => {
+      await request(`/chunks/${id}`, { method: "DELETE" });
+      if (state.chunk?.id === id) {
+        state.chunk = null;
+        state.source = "person";
+      }
+      if (state.knownChunkId === id) state.knownChunkId = null;
+      document.querySelectorAll(`[data-chunk-id="${id}"]`).forEach(node => node.remove());
+    }, `Chunk #${id} deleted.`);
+  });
 
   function assignChunk(chunkId, personId) {
     const name = state.people.find(person => person.id === personId);

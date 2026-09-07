@@ -123,6 +123,26 @@ app, and repeat the voice setup with a new recording.
 
 ## Processing and Troubleshooting
 
+### Archive on Android
+
+Open **Archive** from the phone's Recordings screen. It uses the server address
+and port saved in Settings and opens the shared conversation explorer inside
+the app. The updated server must be reachable from the phone. Search by text
+or meaning, inspect voice similarity, create or rename people, and assign or
+unassign chunks there. Android Back closes the current dialog before returning
+to recordings. Archive browsing does not require microphone permission.
+
+The trash action on each chunk asks for confirmation. The
+`DELETE /api/explorer/chunks/{chunk_id}` endpoint returns `204` on success and
+`404` for a missing chunk. It deletes the chunk's transcript, word timings,
+and text/voice embeddings, then recomputes the assigned person's profile in
+the same transaction. Removing the last sample clears the profile but keeps
+the person. The recording identity stays in the database to prevent a repeat
+upload from recreating deleted chunks. Local recordings on the phone are
+managed separately from archive chunks.
+
+### Model Processing
+
 The first recording downloads models and may take several minutes on CPU.
 Enrollment uses the existing SpeechBrain speaker model to create a
 normalized, word-weighted voice embedding; it does not retrain model weights.
@@ -152,3 +172,16 @@ To run the explorer checks against actual pgvector queries, set
 `.venv/bin/python -m unittest discover -s tests -p test_explorer.py -v`.
 The tests create and remove their own schemas and need permission to create
 the vector extension and schemas in that database.
+
+Browser regression checks use intercepted fixture responses and never access
+deployment data. With Playwright installed in an external tools directory:
+
+```sh
+npm install --prefix /tmp/voxvault-browser-tests playwright
+/tmp/voxvault-browser-tests/node_modules/.bin/playwright install chromium
+NODE_PATH=/tmp/voxvault-browser-tests/node_modules node tests/explorer.browser.cjs
+```
+
+These check deletion, failure recovery, speaker management, and narrow and wide
+layouts. Android build, URL handling tests, and lint run from `android/` with
+`./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug`.

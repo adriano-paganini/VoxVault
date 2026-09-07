@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -78,6 +78,12 @@ def chunks(
 @router.get("/chunks/{chunk_id}")
 def chunk(chunk_id: int):
     return explorer_service.get_chunk(chunk_id)
+
+
+@router.delete("/chunks/{chunk_id}", status_code=204)
+def delete_chunk(chunk_id: int):
+    explorer_service.delete_chunk(chunk_id)
+    return Response(status_code=204)
 
 
 @router.get("/persons")

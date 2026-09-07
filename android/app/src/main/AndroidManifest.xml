@@ -37,6 +37,11 @@
         </activity>
 
         <activity
+            android:name=".ExplorerActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
+        <activity
             android:name=".SettingsActivity"
             android:exported="true"
             android:label="@string/settings_title"
