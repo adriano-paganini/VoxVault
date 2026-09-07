@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conversation Explorer | VoxVault</title>
+    <link rel="stylesheet" href="/static/style.css?v=7" />
+    <link rel="stylesheet" href="/static/explorer.css?v=1" />
+  </head>
+  <body class="explorer">
+    <main class="shell explorer-shell">
+      <header class="explorer-heading">
+        <div><h1>VoxVault</h1><p>Conversation explorer</p></div>
+        <a href="/ui/">Setup <img src="/static/icons/arrow-right.svg" alt="" /></a>
+      </header>
+      <nav class="tabs" aria-label="Archive views">
+        <button id="search-tab" class="tab active" type="button" aria-pressed="true"><img src="/static/icons/search.svg" alt="" />Search</button>
+        <button id="people-tab" class="tab" type="button" aria-pressed="false"><img src="/static/icons/users.svg" alt="" />People <span id="people-count" class="count">0</span></button>
+      </nav>
+      <p id="page-error" class="notice error hidden" role="alert"></p>
+      <section id="search-view" aria-label="Search conversation chunks">
+        <form id="search-form" class="search-form">
+          <div class="query-field"><label for="search-query">Conversation search</label><input id="search-query" name="q" type="search" placeholder="Search your conversations" autocomplete="off" maxlength="2000" /></div>
+          <div><label for="search-mode">Search type</label><select id="search-mode"><option value="semantic">Meaning</option><option value="text">Text</option></select></div>
+          <div><label for="search-assignment">Association</label><select id="search-assignment"><option value="all">All chunks</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></div>
+          <button id="search-submit" type="submit"><img src="/static/icons/search.svg" alt="" />Search</button>
+        </form>
+        <div class="results-heading"><h2 id="search-summary" role="status">Loading conversations...</h2><div class="confidence-legend" aria-label="Transcription confidence"><span>Word confidence</span><span class="confidence-high">90%+</span><span class="confidence-medium">60-89%</span><span class="confidence-low">Below 60%</span><span class="confidence-unknown">Unknown</span></div></div>
+        <div id="search-results" class="chunk-list" aria-busy="true"></div>
+        <div id="search-pagination" class="pagination"></div>
+      </section>
+      <section id="people-view" class="hidden" aria-label="People">
+        <div class="results-heading"><h2>People</h2><div class="person-filter"><label for="person-filter">Filter names</label><input id="person-filter" type="search" placeholder="Person name" autocomplete="off" /></div></div>
+        <div id="people-results" class="people-list"></div>
+      </section>
+    </main>
+    <dialog id="inspector" aria-labelledby="inspector-title">
+      <header class="inspector-heading"><div><p class="eyebrow">Voice embedding</p><h2 id="inspector-title">Speaker inspection</h2></div><button id="close-inspector" class="icon-button secondary" type="button" title="Close inspector" aria-label="Close inspector"><img src="/static/icons/x.svg" alt="" /></button></header>
+      <div class="inspector-body">
+        <p id="inspector-error" class="notice error hidden" role="alert"></p>
+        <p id="inspector-status" class="operation-status" role="status" aria-live="polite"></p>
+        <section id="selected-chunk-section" class="selected-chunk hidden" aria-labelledby="selected-chunk-title"><div class="section-heading"><h3 id="selected-chunk-title">Selected chunk</h3><button id="clear-chunk" class="secondary compact" type="button"><img src="/static/icons/x.svg" alt="" />Clear selection</button></div><div id="selected-chunk"></div></section>
+        <div class="inspector-columns">
+          <aside class="person-sidebar" aria-label="Person comparison">
+            <div class="section-heading"><h3>People</h3><span id="comparison-label" class="muted"></span></div>
+            <label class="sr-only" for="comparison-filter">Filter people</label><input id="comparison-filter" type="search" placeholder="Filter people" autocomplete="off" />
+            <div id="comparison-people" class="comparison-people"></div>
+            <form id="create-person-form" class="create-person"><h3>New person</h3><label for="new-person-name">Name</label><input id="new-person-name" required maxlength="200" autocomplete="off" placeholder="Person name" /><button id="create-person-button" type="submit" data-mutation><img src="/static/icons/user-plus.svg" alt="" />Create &amp; assign chunk</button><p id="create-person-unavailable" class="muted">No voice sample selected.</p></form>
+          </aside>
+          <div class="inspection-content">
+            <section id="person-profile" class="profile-section hidden" aria-label="Selected person">
+              <form id="rename-person-form" class="rename-person"><div><label for="person-name">Selected person</label><input id="person-name" required maxlength="200" autocomplete="off" /></div><button id="save-person-name" class="icon-button secondary" type="submit" title="Save person name" aria-label="Save person name" data-mutation><img src="/static/icons/save.svg" alt="" /></button></form>
+              <p id="person-statistics" class="muted"></p>
+              <div id="selected-assignment" class="selected-assignment"><p id="assignment-summary"></p><div class="inline-actions"><button id="assign-selected" type="button" data-mutation><img src="/static/icons/check.svg" alt="" /><span>Assign chunk</span></button><button id="unassign-selected" class="secondary compact" type="button" data-mutation><img src="/static/icons/unlink.svg" alt="" />Unassign</button></div></div>
+              <div class="known-heading"><label for="known-chunks">Confirmed chunks</label><div id="known-pagination" class="pagination compact-pagination"></div></div>
+              <select id="known-chunks" aria-label="Confirmed chunks"></select><div id="known-chunk" class="known-chunk"></div>
+            </section>
+            <p id="no-person" class="empty-state">No person selected.</p>
+            <section class="candidate-section" aria-labelledby="candidate-title">
+              <div class="section-heading"><h3 id="candidate-title">Similar voice samples</h3><span class="muted">Cosine similarity</span></div>
+              <div class="candidate-controls"><div><label for="similarity-source">Compare against</label><select id="similarity-source"><option value="chunk">Selected chunk</option><option value="person">Person profile</option></select></div><div><label for="candidate-scope">Candidates</label><select id="candidate-scope"><option value="other">Other &amp; unassigned</option><option value="unassigned">Unassigned only</option><option value="all">All associations</option></select></div></div>
+              <p id="candidate-summary" class="muted" role="status"></p><div id="candidate-results" class="chunk-list"></div><div id="candidate-pagination" class="pagination"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </dialog>
+    <script src="/static/explorer.js?v=1" defer></script>
+  </body>
+</html>

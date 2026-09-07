@@ -167,20 +167,15 @@ def process_audio_bytes(audio: bytes, timestamp: int, progress=None, enrollment=
 
     person = None
     if enrollment:
-        import numpy as np
+        from explorer_service import weighted_voice_embedding
 
-        embedding = np.average(
-            [chunk.voice_embedding for chunk in chunk_object],
-            axis=0,
-            weights=[chunk.word_count for chunk in chunk_object],
-        )
-        norm = np.linalg.norm(embedding)
-        if not np.isfinite(embedding).all() or norm == 0:
+        embedding, word_count = weighted_voice_embedding(chunk_object)
+        if embedding is None:
             raise EnrollmentError("A voice profile could not be created. Please record the passage again.")
         person = db.models.Person(
             name="Me",
-            voice_embedding=(embedding / norm).tolist(),
-            voice_embedding_word_count=sum(chunk.word_count for chunk in chunk_object),
+            voice_embedding=embedding,
+            voice_embedding_word_count=word_count,
         )
         for chunk in chunk_object:
             chunk.person = person

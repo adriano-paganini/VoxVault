@@ -14,6 +14,7 @@ load_dotenv()
 from Recording import Recording
 from db.database import initialize_database, SessionLocal
 from db.models import Recording as StoredRecording
+from explorer_api import router as explorer_router
 import setup_service
 from encryption import (
     create_encryption_keys,
@@ -41,6 +42,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.include_router(explorer_router)
 
 upload_events = []
 recordings = {}
@@ -112,6 +114,11 @@ async def root():
 @app.get("/ui", include_in_schema=False)
 async def ui():
     return FileResponse("static/index.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/ui/explorer", include_in_schema=False)
+async def explorer_ui():
+    return FileResponse("static/explorer.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/setup/status")

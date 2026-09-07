@@ -50,6 +50,36 @@ the configured host key directory, and downloaded models persist in the
 `sudo docker compose down -v` removes database and model volumes, but
 preserves the private key because its directory is a host bind mount.
 
+## Conversation Explorer
+
+After setup, select **Explore conversations**, or open `/ui/explorer`.
+The explorer uses the existing recordings, transcription words, chunks, and
+people; no database migration or reprocessing is needed.
+
+- Search all chunks with a free-text semantic query, or select text matching
+  for literal case-insensitive search. An empty query browses the archive.
+  Results are paginated and can be filtered by assignment status.
+- Word colors show saved transcription confidence, including a separate
+  unknown-confidence state. Chunk details include recording time, language,
+  offsets, and speaker labels.
+- **Inspect Voice Embedding** opens the selected chunk alongside existing
+  people and ranked voice matches. Select a person, rename them, inspect
+  their known chunks, or create a named person from the selected sample.
+- Assign, reassign, or remove a chunk association without reloading the page.
+  Similarity is cosine similarity, not a calibrated probability of identity;
+  candidate matches become confirmed associations only when assigned.
+
+Each assignment recomputes the affected person's profile from all their
+assigned chunk embeddings, weighted by stored spoken-word counts, then
+normalizes the result to unit length. Reassignment also rebuilds the previous
+person's profile; removing their last sample clears the profile. Repeating
+an assignment does not count the sample twice. Enrollment shares this same
+weighted-profile calculation.
+
+The explorer API is documented under `/docs` at `/api/explorer`. Semantic
+search uses the existing multilingual E5 model and may take longer on its
+first request while loading the model. Text matching does not need inference.
+
 ## Stop and Reset
 
 Stop the service while keeping the database, downloaded models, and keys:
@@ -116,3 +146,9 @@ with model inference mocked, leaving deployment data untouched:
 ```sh
 .venv/bin/python -m unittest discover -s tests -v
 ```
+
+To run the explorer checks against actual pgvector queries, set
+`EXPLORER_TEST_DATABASE_URL` to a PostgreSQL test database and run
+`.venv/bin/python -m unittest discover -s tests -p test_explorer.py -v`.
+The tests create and remove their own schemas and need permission to create
+the vector extension and schemas in that database.
