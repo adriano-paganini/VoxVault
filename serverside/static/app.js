@@ -1,201 +1,284 @@
-const loadingView = document.querySelector("#loading-view");
-const setupView = document.querySelector("#setup-view");
-const warningView = document.querySelector("#warning-view");
-const createdKeysView = document.querySelector("#created-keys-view");
-const publicKeyView = document.querySelector("#public-key-view");
-const publicKeySummary = document.querySelector("#public-key-summary");
-const publicKeyCard = document.querySelector("#public-key-card");
-const errorView = document.querySelector("#error-view");
-const errorOutput = document.querySelector("#error-output");
-
+const $ = (selector) => document.querySelector(selector);
+const stages = [
+  "receiving",
+  "validating",
+  "transcribing",
+  "aligning",
+  "text_embedding",
+  "voice_embedding",
+  "saving",
+];
+let currentView = "";
+let status = null;
 let createdKeys = null;
+let keyWarning = false;
+let deviceKeyLoaded = false;
+let busy = false;
+let pollTimer = null;
+let refreshPromise = null;
 
-function showOnly(...views) {
-  [
-    loadingView,
-    setupView,
-    warningView,
-    createdKeysView,
-    publicKeyView,
-    errorView,
-  ].forEach((view) => view.classList.add("hidden"));
-
-  views.forEach((view) => view.classList.remove("hidden"));
+function setText(selector, value) {
+  const element = $(selector);
+  if (element.textContent !== value) element.textContent = value;
 }
 
 async function requestJson(path, options = {}) {
-  const response = await fetch(path, options);
-  const text = await response.text();
-  const body = text ? JSON.parse(text) : null;
-
+  const response = await fetch(path, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(15000),
+    ...options,
+  });
+  const body = await response.json();
   if (!response.ok) {
-    throw body;
+    throw new Error(
+      typeof body.detail === "string"
+        ? body.detail
+        : "The request could not be completed. Please try again.",
+    );
   }
-
   return body;
 }
 
-function showError(error) {
-  errorOutput.textContent = JSON.stringify(error, null, 2);
-  showOnly(errorView);
-}
-
-function clearElement(id) {
-  const element = document.querySelector(`#${id}`);
-  element.innerHTML = "";
-}
-
-function clearInput(id) {
-  const element = document.querySelector(`#${id}`);
-  element.textContent = "";
-}
-
-function permissionCommands(privateKeyPath) {
-  return [
-    `sudo chown root:root ${privateKeyPath}`,
-    `sudo chmod 600 ${privateKeyPath}`,
-  ].join("\n");
-}
-
-async function renderQr(targetId, text) {
-  const target = document.querySelector(`#${targetId}`);
-  const response = await fetch("/api/qrcode", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({text}),
+function showView(id, step) {
+  document
+    .querySelectorAll(".view")
+    .forEach((view) => view.classList.toggle("hidden", view.id !== id));
+  const steps = ["keys", "device", "reading", "upload", "profile"];
+  document.querySelectorAll(".steps li").forEach((item) => {
+    const active = item.dataset.step === step;
+    item.classList.toggle("active", active);
+    item.classList.toggle(
+      "done",
+      steps.indexOf(item.dataset.step) < steps.indexOf(step) ||
+        status?.stage === "complete",
+    );
+    if (active) item.setAttribute("aria-current", "step");
+    else item.removeAttribute("aria-current");
   });
-
-  if (!response.ok) {
-    throw await response.json();
+  if (currentView !== id) {
+    currentView = id;
+    const heading = $(`#${id} h2`);
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+    window.scrollTo(0, 0);
   }
-
-  target.innerHTML = await response.text();
 }
 
-async function renderPublicKeyQr(targetId, fallbackDeepLink) {
-  const target = document.querySelector(`#${targetId}`);
-  const response = await fetch("/api/keys/qrcode", {cache: "no-store"});
-
-  if (response.ok) {
-    target.innerHTML = await response.text();
-    return;
-  }
-
-  if (!fallbackDeepLink) {
-    throw await response.json();
-  }
-
-  await renderQr(targetId, fallbackDeepLink);
+function showError(error) {
+  $("#error-output").textContent =
+    error.message || "Could not reach the server. Please try again.";
+  $("#error-view").classList.remove("hidden");
 }
 
-function publicKeyQrLink(data) {
-  return data.publicKeyQrLink || data.publicKeyDeepLink || `voxvault://setup?key=${encodeURIComponent(data.publicKey)}`;
-}
-
-async function showPublicKey() {
+async function loadDeviceKey() {
+  if (deviceKeyLoaded) return;
   const data = await requestJson("/api/keys/public");
-  document.querySelector("#public-key-output").textContent = data.publicKey;
-  await renderPublicKeyQr("public-key-qr", publicKeyQrLink(data));
-  publicKeySummary.classList.add("hidden");
-  publicKeyCard.classList.remove("hidden");
-  showOnly(publicKeyView);
+  $("#public-key-output").textContent = data.publicKey;
+  const qr = $("#public-key-qr");
+  qr.onerror = () => $("#qr-error").classList.remove("hidden");
+  qr.onload = () => $("#qr-error").classList.add("hidden");
+  qr.src = `/api/keys/qrcode?v=${Date.now()}`;
+  deviceKeyLoaded = true;
 }
 
-function showPublicKeySummary() {
-  clearInput("public-key-output");
-  clearElement("public-key-qr");
-  publicKeyCard.classList.add("hidden");
-  publicKeySummary.classList.remove("hidden");
-  showOnly(publicKeyView);
-}
-
-async function revealCreatedKeys() {
-  document.querySelector("#private-key-output").textContent = createdKeys.privateKey;
-  document.querySelector("#created-public-key-output").textContent = createdKeys.publicKey;
-
-  await renderPublicKeyQr("created-public-key-qr", publicKeyQrLink(createdKeys));
-
-  showOnly(createdKeysView);
-}
-
-function hideCreatedKeys() {
-  clearInput("private-key-output");
-  clearInput("created-public-key-output");
-  clearElement("created-public-key-qr");
-  showOnly(warningView);
-}
-
-function hidePublicKey() {
-  showPublicKeySummary();
-}
-
-document.querySelector("#create-keys-button").addEventListener("click", async () => {
+function renderConnection() {
+  let address;
   try {
-    createdKeys = await requestJson("/api/keys/create", {method: "POST"});
+    address = new URL(status.publicUrl || window.location.origin);
+    if (!["http:", "https:"].includes(address.protocol))
+      throw new Error("Invalid protocol");
+  } catch {
+    address = new URL(window.location.origin);
+  }
+  const local = ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"].includes(
+    address.hostname,
+  );
+  $("#backend-url").textContent = local
+    ? `${address.protocol}//<server-address>`
+    : `${address.protocol}//${address.hostname}`;
+  $("#backend-port").textContent =
+    address.port || (address.protocol === "https:" ? "443" : "80");
+  $("#localhost-notice").classList.toggle("hidden", !local);
+}
 
-    if (!createdKeys.created) {
-      await showPublicKey();
-      return;
+function renderProgress() {
+  const failed = status.stage === "failed";
+  const lastStage = failed ? status.history.at(-2)?.stage : status.stage;
+  const activeIndex = stages.indexOf(lastStage);
+  $("#processing-title").textContent = failed
+    ? "Your voice profile needs another try"
+    : "Creating your voice profile";
+  setText(
+    "#processing-message",
+    failed
+      ? "Processing has stopped."
+      : status.history.at(-1)?.message || "Processing your recording...",
+  );
+  const receiving = status.stage === "receiving";
+  $("#upload-progress-wrap").classList.toggle("hidden", !receiving);
+  $("#upload-progress").max = status.totalChunks || 1;
+  $("#upload-progress").value = status.receivedChunks;
+  $("#upload-count").textContent =
+    `${status.receivedChunks} of ${status.totalChunks} chunks received`;
+  $("#processing-error").classList.toggle("hidden", !failed);
+  $("#processing-error-message").textContent = status.error || "";
+  $("#model-notice").classList.toggle("hidden", failed || receiving);
+  document.querySelectorAll("#processing-steps li").forEach((item, index) => {
+    item.classList.toggle("done", index < activeIndex);
+    item.classList.toggle("active", !failed && index === activeIndex);
+    item.classList.toggle("failed", failed && index === activeIndex);
+  });
+}
+
+async function render() {
+  if (!status.keysExist) {
+    deviceKeyLoaded = false;
+    showView("setup-view", "keys");
+  } else if (keyWarning) {
+    showView("warning-view", "keys");
+  } else if (status.stage === "device") {
+    await loadDeviceKey();
+    showView("device-view", "device");
+  } else if (status.stage === "reading") {
+    setText("#reading-text", status.readingText);
+    showView("reading-view", "reading");
+  } else if (status.stage === "awaiting_upload") {
+    renderConnection();
+    showView("upload-view", "upload");
+  } else if (status.stage === "complete") {
+    if (!$("#complete-qr").getAttribute("src"))
+      $("#complete-qr").src = "/api/keys/qrcode";
+    showView("complete-view", "profile");
+  } else {
+    renderProgress();
+    showView("processing-view", "profile");
+  }
+}
+
+async function refresh() {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    try {
+      status = await requestJson("/api/setup/status");
+      await render();
+      setText("#connection-status", "Connected");
+      $("#connection-status").classList.remove("offline");
+      if ($("#error-view").dataset.connectionError === "true") {
+        $("#error-view").classList.add("hidden");
+        delete $("#error-view").dataset.connectionError;
+      }
+    } catch (error) {
+      setText("#connection-status", "Connection lost. Reconnecting...");
+      $("#connection-status").classList.add("offline");
+      if (!status || currentView === "") {
+        showError(error);
+        $("#error-view").dataset.connectionError = "true";
+      }
     }
-
-    const privateKeyHostPath = createdKeys.privateKeyHostPath || createdKeys.privateKeyPath;
-    document.querySelector("#private-key-path-warning").textContent = privateKeyHostPath;
-    document.querySelector("#permission-commands").textContent = permissionCommands(privateKeyHostPath);
-    showOnly(warningView);
-  } catch (error) {
-    showError(error);
-  }
-});
-
-document.querySelector("#reveal-created-keys-button").addEventListener("click", async () => {
+  })();
   try {
-    await revealCreatedKeys();
-  } catch (error) {
-    showError(error);
+    await refreshPromise;
+  } finally {
+    refreshPromise = null;
   }
-});
+}
 
-document.querySelector("#hide-created-keys-button").addEventListener("click", hideCreatedKeys);
+async function poll() {
+  if (!busy) await refresh();
+  pollTimer = setTimeout(poll, 1000);
+}
 
-document.querySelector("#display-public-key-button").addEventListener("click", async () => {
-  try {
-    await showPublicKey();
-  } catch (error) {
-    showError(error);
+function action(selector, callback) {
+  $(selector).addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
+    document
+      .querySelectorAll(
+        ".actions button, #create-keys-button, #reveal-created-keys-button",
+      )
+      .forEach((button) => (button.disabled = true));
+    $("#error-view").classList.add("hidden");
+    try {
+      if (refreshPromise) await refreshPromise;
+      await callback();
+    } catch (error) {
+      showError(error);
+    } finally {
+      busy = false;
+      document
+        .querySelectorAll("button")
+        .forEach((button) => (button.disabled = false));
+    }
+  });
+}
+
+async function advance(step) {
+  const next = await requestJson("/api/setup/step", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step }),
+  });
+  status = { ...status, ...next };
+  if (step === "reading") {
+    createdKeys = null;
+    $("#private-key-output").textContent = "";
+    $("#created-private-key").classList.add("hidden");
   }
-});
+  await render();
+}
 
-document.querySelector("#hide-public-key-button").addEventListener("click", hidePublicKey);
+action("#create-keys-button", async () => {
+  createdKeys = await requestJson("/api/keys/create", { method: "POST" });
+  status.keysExist = true;
+  keyWarning = createdKeys.created;
+  if (keyWarning) {
+    $("#private-key-path-warning").textContent =
+      createdKeys.privateKeyHostPath || createdKeys.privateKeyPath;
+    $("#private-key-output").textContent = createdKeys.privateKey;
+    $("#created-private-key").classList.remove("hidden");
+  }
+  await render();
+});
+action("#reveal-created-keys-button", async () => {
+  keyWarning = false;
+  await render();
+});
+action("#next-reading-button", () => advance("reading"));
+action("#finished-reading-button", () => advance("awaiting_upload"));
+action("#read-again-button", () => advance("reading"));
+action("#retry-reading-button", () => advance("reading"));
+action("#retry-upload-button", () => advance("awaiting_upload"));
+action("#retry-connection-button", refresh);
 
 document.querySelectorAll("[data-copy-target]").forEach((button) => {
   button.addEventListener("click", async () => {
-    const target = document.querySelector(`#${button.dataset.copyTarget}`);
-    const originalText = button.textContent;
-    const copyText = target.textContent;
-
-    await navigator.clipboard.writeText(copyText);
-    button.textContent = "Copied";
-    button.classList.add("copied");
-    setTimeout(() => {
-      button.textContent = originalText;
-      button.classList.remove("copied");
-    }, 1200);
+    const target = $(`#${button.dataset.copyTarget}`);
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(target.textContent);
+      } else {
+        const field = document.createElement("textarea");
+        field.value = target.textContent;
+        field.className = "clipboard-field";
+        document.body.appendChild(field);
+        field.select();
+        let copied;
+        try {
+          copied = document.execCommand("copy");
+        } finally {
+          field.remove();
+        }
+        if (!copied) throw new Error("Clipboard unavailable");
+      }
+      $("#copy-status").textContent = "Key copied.";
+    } catch {
+      $("#copy-status").textContent =
+        "Could not copy. Select the key and copy it manually.";
+    }
   });
 });
-
-async function initialize() {
-  try {
-    const status = await requestJson("/api/keys/status");
-
-    if (status.keysExist) {
-      showPublicKeySummary();
-      return;
-    }
-
-    showOnly(setupView);
-  } catch (error) {
-    showError(error);
-  }
-}
-
-initialize();
+window.addEventListener("pagehide", () => clearTimeout(pollTimer));
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) poll();
+});
+poll();

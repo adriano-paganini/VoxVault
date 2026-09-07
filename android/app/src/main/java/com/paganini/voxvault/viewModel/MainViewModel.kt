@@ -9,6 +9,10 @@ import android.os.IBinder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.viewModelScope
+import com.paganini.voxvault.SettingsManager
+import com.paganini.voxvault.dataClass.Recording
+import kotlinx.coroutines.launch
 import com.paganini.voxvault.service.HttpCommunicationService
 import com.paganini.voxvault.service.ListeningService
 import com.paganini.voxvault.service.RecordingFileReaderService
@@ -18,7 +22,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _listeningService = MutableLiveData<ListeningService?>()
     val listeningService: LiveData<ListeningService?> = _listeningService
 
+    private val _recordings = MutableLiveData<List<Recording>>()
+    val recordings: LiveData<List<Recording>> = _recordings
+
+    enum class SortOrder { DATE, DURATION }
+    var currentSortOrder = SortOrder.DATE
+        private set
+
+    private val settingsManager = SettingsManager(application)
+
+    init {
+        viewModelScope.launch {
+            settingsManager.sortOrderFlow.collect { orderName ->
+                currentSortOrder = try { SortOrder.valueOf(orderName) } catch (e: Exception) { SortOrder.DATE }
+                _recordings.value?.let {
+                    _recordings.value = sortList(it)
+                }
+            }
+        }
+    }
+
     var recordingFileReaderService = RecordingFileReaderService(application)
+
+    fun refreshRecordings() {
+        val list = recordingFileReaderService.getAllRecordings()
+        _recordings.value = sortList(list)
+    }
+
+    fun setSortOrder(order: SortOrder) {
+        viewModelScope.launch {
+            settingsManager.updateSortOrder(order.name)
+        }
+    }
+
+    private fun sortList(list: List<Recording>): List<Recording> {
+        return when (currentSortOrder) {
+            SortOrder.DATE -> list.sortedByDescending { it.timestamp }
+            SortOrder.DURATION -> list.sortedByDescending { it.duration }
+        }
+    }
 
     var httpCommunicationService = HttpCommunicationService(application)
 

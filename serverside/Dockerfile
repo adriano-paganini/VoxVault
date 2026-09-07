@@ -16,11 +16,17 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local
 
-COPY main.py .
-COPY encryption.py .
+COPY *.py .
+COPY db ./db
 COPY static ./static
 
-ENV VOXVAULT_PORT=8000
-EXPOSE ${VOXVAULT_PORT}
+ENV HF_HOME=/app/models/huggingface
+ENV TORCH_HOME=/app/models/torch
 
-CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${VOXVAULT_PORT}"]
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+EXPOSE 6100
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "6100"]

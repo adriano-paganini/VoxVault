@@ -1,5 +1,6 @@
 package com.paganini.voxvault
 
+import android.util.Base64
 import com.paganini.voxvault.dataClass.Chunk
 import com.paganini.voxvault.dataClass.Recording
 import java.io.File
@@ -16,6 +17,8 @@ class Chunker(
     }?.sortedBy { it.name } ?: emptyList()
 
     val totalChunks: Int = chunkFiles.size
+    val recordingDirPath: String = recordingDir.absolutePath
+    val chunkFileNames: List<String> = chunkFiles.map { it.name }
     private var currentChunkIndex: Int = 0
 
     fun hasNext(): Boolean = currentChunkIndex < totalChunks
@@ -25,6 +28,8 @@ class Chunker(
 
         val file = chunkFiles[currentChunkIndex]
         val bytes = file.readBytes()
+
+        val base64Data = Base64.encodeToString(bytes, Base64.NO_WRAP)
         
         // Correct initialization: Create a ShortArray of the appropriate size
         val shortData = ShortArray(bytes.size / 2)
@@ -39,7 +44,8 @@ class Chunker(
             timestamp = recording.timestamp,
             totalChunks = totalChunks,
             chunkIndex = currentChunkIndex++,
-            data = shortData
+            encryptedSerializedSymmetricKey= recording.encryptedSerializedSymmetricKey,
+            data = base64Data
         )
     }
 }

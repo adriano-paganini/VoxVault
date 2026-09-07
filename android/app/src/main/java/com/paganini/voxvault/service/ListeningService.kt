@@ -36,6 +36,7 @@ class ListeningService : Service() {
     private val binder = LocalBinder()
 
     var speakingListener: (() -> Unit)? = null
+    var onRecordingCompleted: (() -> Unit)? = null
     var sharedSpeaking = 0
     var isListening = false
 
@@ -46,11 +47,13 @@ class ListeningService : Service() {
 
     private var ringBufferInsertionIndex = 0
     private var samplesInRingBuffer = 0
-    private var ringBuffer = ShortArray(0)
+    private var ringBuffer = ByteArray(0)
 
     private var chunkCounter = 1
     private var currentFile : File?= null
     private var currentFileOutputStream : FileOutputStream? = null
+
+    private var encryptionService: EncryptionService? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): ListeningService = this@ListeningService
@@ -169,8 +172,8 @@ class ListeningService : Service() {
 
         isListening = true
         
-        // Re-initialize ring buffer with potentially new size
-        ringBuffer = ShortArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE)
+        // Re-initialize ring buffer with potentially new size (2 bytes per short)
+        ringBuffer = ByteArray(AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE * 2)
         samplesInRingBuffer = 0
         ringBufferInsertionIndex = 0
         
@@ -191,19 +194,27 @@ class ListeningService : Service() {
     }
 
     private fun listeningLoop() {
-        val buffer = ShortArray(AppConfig.Audio.BUFFER_SIZE)
+        // Correctly initialize arrays once to avoid garbage collection pressure
+        val audioBuffer = ByteArray(AppConfig.Audio.BUFFER_SIZE * 2)
+        val vadBuffer = ShortArray(AppConfig.Audio.BUFFER_SIZE)
+        val shortView = ByteBuffer.wrap(audioBuffer).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+
         var silenceDuration = 0
         var recordingState = 0
         var recordingDuration = 0
         while (isListening) {
-            val readResult = audioListener?.read(buffer, 0, AppConfig.Audio.BUFFER_SIZE)
+            val readResult = audioListener?.read(audioBuffer, 0, audioBuffer.size)
             if (readResult != null && readResult > 0) {
-                if (recordingState == 0) ringBufferAppend(buffer)
+                if (recordingState == 0) ringBufferAppend(audioBuffer)
                 else{
-                    writeToFile(buffer)
+                    encryptionService?.encryptByteArray(audioBuffer)
                     recordingDuration+= AppConfig.Audio.MS_PER_FRAME
                 }
-                val isSpeech = vad?.isSpeech(buffer) ?: false
+                
+                // Convert bytes to shorts only for VAD check
+                shortView.position(0)
+                shortView.get(vadBuffer)
+                val isSpeech = vad?.isSpeech(vadBuffer) ?: false
 
                 if (isSpeech) {
                     if (recordingState == 0) {
@@ -234,17 +245,16 @@ class ListeningService : Service() {
 
                 if (recordingDuration >= AppConfig.Audio.RECORDING_CHUNK_SIZE_MS){
                     val directory = currentFile?.parent
-                    currentFileOutputStream?.close()
-                    currentFileOutputStream = null
                     chunkCounter++
                     recordingDuration = 0
 
                     currentFile = File("$directory/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
-                    currentFileOutputStream = FileOutputStream(currentFile)
+                    encryptionService?.update(currentFile)
                 }
 
                 if (silenceDuration >= AppConfig.Audio.RECORDING_MAX_SILENCE) {
                     completeMetadata()
+
                     recordingState = 0
                     silenceDuration = 0
                     recordingDuration = 0
@@ -253,10 +263,8 @@ class ListeningService : Service() {
                     ringBuffer.fill(0)
                     chunkCounter = 1
 
-                    try {
-                        currentFileOutputStream?.flush()
-                        currentFileOutputStream?.close()
-                    } catch (_: Exception) { }
+                    encryptionService?.close()
+                    encryptionService = null
                     currentFileOutputStream = null
 
                     sharedSpeaking = 0
@@ -280,30 +288,24 @@ class ListeningService : Service() {
 
         currentFile = File("$recordingDir/chunk_${String.format(Locale.US, "%03d", chunkCounter)}.pcm")
 
-        saveInitialMetadata(recordingDir)
+        encryptionService = EncryptionService(currentFile)
 
-        val bufferSize = ringBuffer.size
-        val byteBuffer = ByteBuffer.allocate(bufferSize*2)
-            .order(ByteOrder.LITTLE_ENDIAN)
+        saveInitialMetadata(recordingDir)
 
         val bufferedSamples = ringBufferGetAll()
 
-        byteBuffer.asShortBuffer().put(bufferedSamples)
-
-        currentFileOutputStream = FileOutputStream(currentFile)
-
-        currentFileOutputStream?.write(byteBuffer.array())
+        encryptionService?.encryptByteArray(bufferedSamples)
     }
 
-    fun writeToFile(buffer: ShortArray){
-        val byteBuffer = ByteBuffer.allocate(AppConfig.Audio.BUFFER_SIZE*2).order(ByteOrder.LITTLE_ENDIAN)
-        byteBuffer.asShortBuffer().put(buffer)
-
-        currentFileOutputStream?.write(byteBuffer.array())
-    }
     fun endListening() {
         if (!isListening) return
         completeMetadata()
+
+        if (encryptionService!= null){
+            encryptionService?.close()
+            encryptionService = null
+        }
+
         isListening = false
 
         // 1. Stop hardware resources
@@ -336,34 +338,34 @@ class ListeningService : Service() {
         notificationManager.notify(AppConfig.UI.NOTIFICATION_ID, buildNotification("Ready to listen"))
     }
 
-    fun ringBufferAppend(data: ShortArray) {
-        val bufferSize = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE
+    fun ringBufferAppend(data: ByteArray) {
+        val bufferSize = AppConfig.Audio.PRE_RECORDING_BUFFER_SIZE * 2
         if (ringBuffer.size != bufferSize) {
-            ringBuffer = ShortArray(bufferSize)
+            ringBuffer = ByteArray(bufferSize)
             ringBufferInsertionIndex = 0
             samplesInRingBuffer = 0
         }
         
         val remainingSpace = bufferSize - ringBufferInsertionIndex
 
-        if (remainingSpace >= AppConfig.Audio.BUFFER_SIZE) {
-            System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, AppConfig.Audio.BUFFER_SIZE)
+        if (remainingSpace >= data.size) {
+            System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, data.size)
         } else {
             System.arraycopy(data, 0, ringBuffer, ringBufferInsertionIndex, remainingSpace)
-            System.arraycopy(data, remainingSpace, ringBuffer, 0, AppConfig.Audio.BUFFER_SIZE - remainingSpace)
+            System.arraycopy(data, remainingSpace, ringBuffer, 0, data.size - remainingSpace)
         }
 
-        ringBufferInsertionIndex = (ringBufferInsertionIndex + AppConfig.Audio.BUFFER_SIZE) % bufferSize
+        ringBufferInsertionIndex = (ringBufferInsertionIndex + data.size) % bufferSize
 
         samplesInRingBuffer = minOf(
-            samplesInRingBuffer + AppConfig.Audio.BUFFER_SIZE,
+            samplesInRingBuffer + data.size,
             bufferSize
         )
     }
 
-    fun ringBufferGetAll():ShortArray{
+    fun ringBufferGetAll():ByteArray{
         val bufferSize = ringBuffer.size
-        val bufferContent = ShortArray(bufferSize)
+        val bufferContent = ByteArray(bufferSize)
         System.arraycopy(ringBuffer, ringBufferInsertionIndex, bufferContent,
             0,bufferSize-ringBufferInsertionIndex)
         System.arraycopy(ringBuffer,0,bufferContent,
@@ -374,7 +376,8 @@ class ListeningService : Service() {
     private fun saveInitialMetadata(directory: File) {
         val metadataFile = File(directory, "metadata.json")
         val recording = Recording(
-            timestamp = System.currentTimeMillis()
+            timestamp = System.currentTimeMillis(),
+            encryptedSerializedSymmetricKey = encryptionService?.getSerializedEncryptedSymmetricKey() ?: "",
         )
         metadataFile.writeText(Json.encodeToString(recording))
     }
@@ -403,6 +406,8 @@ class ListeningService : Service() {
 
             // 4. Encode and save back
             metadataFile.writeText(Json.encodeToString(recording))
+            
+            onRecordingCompleted?.invoke()
         } catch (_: Exception) {
             // Log or handle error
         }

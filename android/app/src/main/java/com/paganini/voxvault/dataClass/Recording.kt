@@ -17,6 +17,7 @@ import java.util.Locale
 @Serializable
 data class Recording(
     var name: String = "",
+    var encryptedSerializedSymmetricKey: String = "",
     var duration: Double = 0.0,
     val timestamp: Long = 0L,
 ) {

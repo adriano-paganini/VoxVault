@@ -1,11 +1,11 @@
 # Test your FastAPI endpoints
 
-GET http://127.0.0.1:8000/
+GET http://127.0.0.1:6100/
 Accept: application/json
 
 ###
 
-POST http://127.0.0.1:8000/ping
+POST http://127.0.0.1:6100/ping
 Accept: application/json
 Content-Type: application/json
 

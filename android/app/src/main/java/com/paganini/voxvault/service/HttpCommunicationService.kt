@@ -23,6 +23,14 @@ class HttpCommunicationService(private val context: Context) {
         var lastResult = ""
         val totalChunks = chunker.totalChunks
 
+        if (totalChunks == 0) {
+            Log.e(
+                "HttpCommunicationService",
+                "No chunks found for recording: ${recording.name} in ${chunker.recordingDirPath}. Files: ${chunker.chunkFileNames}"
+            )
+            return "Error: No chunks found for ${recording.name}"
+        }
+
         while (chunker.hasNext()) {
             val chunk = chunker.getNextChunk() ?: break
             lastResult = sendChunk(chunk)
