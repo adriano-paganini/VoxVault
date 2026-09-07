@@ -15,5 +15,8 @@
     <string name="encryption_public_key">Encryption Public Key (44 chars)</string>
     <string name="back">Back</string>
     <string name="save">Save</string>
+    <string name="sort_by">Sort by:</string>
+    <string name="date">Date</string>
+    <string name="duration">Duration</string>
     <string name="upload_success">Upload Success</string>
 </resources>

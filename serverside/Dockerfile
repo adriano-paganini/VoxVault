@@ -16,9 +16,16 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local
 
-COPY main.py .
-COPY encryption.py .
+COPY *.py .
+COPY db ./db
 COPY static ./static
+
+ENV HF_HOME=/app/models/huggingface
+ENV TORCH_HOME=/app/models/torch
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 6100
 

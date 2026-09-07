@@ -59,8 +59,9 @@ class MainActivity : AppCompatActivity() {
         // Input Listeners
         setupClickListeners()
 
-        // Recording File Listener
-        setupRecordingFileReaderService()
+        // Recording Observation
+        setupRecordingObservation()
+        viewModel.refreshRecordings()
 
         // Initial State / Permissions
         if (savedInstanceState == null) {
@@ -73,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         viewModel.bindService()
+        viewModel.refreshRecordings()
     }
 
     override fun onStop() {
@@ -96,6 +98,12 @@ class MainActivity : AppCompatActivity() {
                 service.speakingListener = {
                     runOnUiThread {
                         syncUIWithService(service, listeningToggleButton, mainView)
+                    }
+                }
+                
+                service.onRecordingCompleted = {
+                    runOnUiThread {
+                        viewModel.refreshRecordings()
                     }
                 }
             }
@@ -150,17 +158,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun setupRecordingFileReaderService() {
-        lifecycleScope.launch {
-            while (true) {
-                val recordings = viewModel.recordingFileReaderService.getAllRecordings()
-
-                recordings.forEach { r ->
-                    addToScrollableList(r)
-                }
-
-                delay(15.seconds)
+    private fun setupRecordingObservation() {
+        viewModel.recordings.observe(this) { recordings ->
+            val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+            parent.removeAllViews()
+            displayedRecordings.clear()
+            recordings.forEach { r ->
+                addToScrollableList(r)
             }
+            updateSelectAllButtonText()
         }
     }
 
@@ -204,6 +210,14 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        findViewById<Button>(R.id.sortByDate).setOnClickListener {
+            viewModel.setSortOrder(MainViewModel.SortOrder.DATE)
+        }
+
+        findViewById<Button>(R.id.sortByDuration).setOnClickListener {
+            viewModel.setSortOrder(MainViewModel.SortOrder.DURATION)
         }
 
         findViewById<Button>(R.id.selectAll).setOnClickListener {

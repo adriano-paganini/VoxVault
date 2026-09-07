@@ -2,15 +2,57 @@ services:
   voxvault:
     build: .
     image: voxvault-server:latest
+    env_file:
+      - .env
     ports:
       - "${VOXVAULT_PORT:-6100}:6100"
     environment:
       VOXVAULT_PORT: 6100
-      # Optional: set this to a URL reachable by your phone, for example:
-      # VOXVAULT_PUBLIC_BASE_URL: http://192.168.1.20:6100
-      VOXVAULT_PUBLIC_BASE_URL: ${VOXVAULT_PUBLIC_BASE_URL:-}
       VOXVAULT_PRIVATE_KEY_PATH: /data/server-privatekey.key
-      VOXVAULT_PRIVATE_KEY_HOST_PATH: /etc/voxvault/server-privatekey.key
+      VOXVAULT_PRIVATE_KEY_HOST_PATH: ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}/server-privatekey.key
+      VOXVAULT_PUBLIC_URL: ${VOXVAULT_PUBLIC_URL:-}
+      DATABASE_URL: postgresql+psycopg://voxvault:voxvault@postgres:5432/voxvault
+      HF_HOME: /app/models/huggingface
+      TORCH_HOME: /app/models/torch
     volumes:
-      # Mount the host key directory. The app creates server-privatekey.key inside it.
       - ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}:/data
+      - voxvault-models:/app/models
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:6100/api/setup/status', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  reset-keys:
+    profiles: ["reset"]
+    image: voxvault-server:latest
+    pull_policy: never
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["rm", "-f", "--", "/data/server-privatekey.key"]
+    volumes:
+      - ${VOXVAULT_KEY_DIR_HOST:-/etc/voxvault}:/data
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: voxvault
+      POSTGRES_USER: voxvault
+      POSTGRES_PASSWORD: voxvault
+    ports:
+      - "5432:5432"
+    volumes:
+      - voxvault-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voxvault -d voxvault"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  voxvault-postgres:
+  voxvault-models:

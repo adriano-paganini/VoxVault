@@ -36,6 +36,7 @@ class ListeningService : Service() {
     private val binder = LocalBinder()
 
     var speakingListener: (() -> Unit)? = null
+    var onRecordingCompleted: (() -> Unit)? = null
     var sharedSpeaking = 0
     var isListening = false
 
@@ -405,6 +406,8 @@ class ListeningService : Service() {
 
             // 4. Encode and save back
             metadataFile.writeText(Json.encodeToString(recording))
+            
+            onRecordingCompleted?.invoke()
         } catch (_: Exception) {
             // Log or handle error
         }

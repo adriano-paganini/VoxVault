@@ -1,112 +1,265 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>VoxVault Key Setup</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VoxVault Setup</title>
+    <link rel="stylesheet" href="/static/style.css?v=8" />
   </head>
   <body>
     <main class="shell">
-      <header>
-        <p class="eyebrow">VoxVault</p>
-        <h1>Key Setup</h1>
+      <header class="view-heading">
+        <div>
+          <p class="eyebrow">Personal voice archive</p>
+          <h1>VoxVault Setup</h1>
+        </div>
+        <span id="connection-status" role="status">Connecting...</span>
       </header>
-
-      <section id="loading-view" class="panel">
-        <h2>Loading</h2>
-        <p>Checking key status...</p>
+      <nav aria-label="Setup progress">
+        <ol class="steps">
+          <li data-step="keys">1. Server keys</li>
+          <li data-step="device">2. Connect app</li>
+          <li data-step="reading">3. Read aloud</li>
+          <li data-step="upload">4. Send recording</li>
+          <li data-step="profile">5. Voice profile</li>
+        </ol>
+      </nav>
+      <section id="error-view" class="notice error hidden" role="alert">
+        <p id="error-output"></p>
+        <button id="retry-connection-button" class="secondary" type="button">
+          Reconnect
+        </button>
       </section>
-
-      <section id="setup-view" class="panel hidden">
+      <section id="loading-view" class="view">
+        <h2>Checking your setup...</h2>
+      </section>
+      <section id="setup-view" class="view hidden">
+        <p class="eyebrow">Step 1 of 5</p>
         <h2>Create Server Keys</h2>
-        <p>No server keys were found. Create them once, store the private key securely, then copy the public key into your app.</p>
+        <p>
+          No server keys were found. Create them once to connect your phone.
+        </p>
         <button id="create-keys-button" type="button">Create Keys</button>
       </section>
-
-      <section id="warning-view" class="panel warning hidden">
+      <section id="warning-view" class="view hidden">
         <h2>Private Key Warning</h2>
-        <p>Your private key must stay absolutely private. It has already been stored at <code id="private-key-path-warning"></code>.</p>
-        <p>Secure the key file on the server with:</p>
-        <div class="copy-box">
-          <button class="copy-button" data-copy-target="permission-commands" type="button" title="Copy commands">Copy</button>
-          <pre id="permission-commands"></pre>
+        <p>
+          Your private key has been stored at
+          <code id="private-key-path-warning"></code>. Keep it private and back
+          it up securely.
+        </p>
+        <button id="reveal-created-keys-button" type="button">
+          I understand, continue
+        </button>
+      </section>
+      <section id="device-view" class="view hidden">
+        <p class="eyebrow">Step 2 of 5</p>
+        <h2>Set up VoxVault on your phone</h2>
+        <div class="device-layout">
+          <div>
+            <ol class="instructions">
+              <li>Install the VoxVault Android app and open it.</li>
+              <li>
+                Accept all requested permissions, including microphone access.
+              </li>
+              <li>
+                Scan this <strong>public-key QR code</strong> with your phone's
+                camera, then open the link in VoxVault. The app saves the key
+                automatically.
+              </li>
+            </ol>
+            <p>
+              If the camera cannot open the link, paste the public key into
+              <strong>Settings &gt; Encryption Public Key</strong> and tap
+              <strong>Save</strong>.
+            </p>
+            <div class="copy-box">
+              <button
+                class="copy-button"
+                data-copy-target="public-key-output"
+                type="button"
+                title="Copy public key"
+                aria-label="Copy public key"
+              >
+                <img src="/static/icons/copy.svg" alt="" />
+              </button>
+              <pre id="public-key-output" class="key-output"></pre>
+            </div>
+            <p id="qr-error" class="qr-error hidden" role="alert">
+              The QR code could not be loaded. Copy the public key into the app.
+            </p>
+          </div>
+          <div class="qr">
+            <img
+              id="public-key-qr"
+              alt="Scan to save the public key in VoxVault"
+              width="260"
+              height="260"
+            />
+          </div>
+        </div>
+        <details id="created-private-key" class="hidden">
+          <summary>Back up the generated private key</summary>
+          <p>
+            This is the only time the private key can be displayed here. The
+            phone only needs the public key above.
+          </p>
+          <div class="copy-box">
+            <button
+              class="copy-button"
+              data-copy-target="private-key-output"
+              type="button"
+              title="Copy private key"
+              aria-label="Copy private key"
+            >
+              <img src="/static/icons/copy.svg" alt="" />
+            </button>
+            <pre id="private-key-output" class="key-output"></pre>
+          </div>
+        </details>
+        <div class="actions">
+          <button id="next-reading-button" type="button">
+            Next step <img src="/static/icons/arrow-right.svg" alt="" />
+          </button>
+        </div>
+      </section>
+      <section id="reading-view" class="view hidden">
+        <p class="eyebrow">Step 3 of 5 &middot; About 60-90 seconds</p>
+        <h2>Record your voice</h2>
+        <p>
+          On your phone, tap <strong>Listen</strong>, then read the full passage
+          below at your normal pace. Use a quiet room, speak on your own, and
+          keep pauses brief so the app keeps a single recording.
+        </p>
+        <blockquote id="reading-text" class="reading-text"></blockquote>
+        <p>
+          Finished reading? Tap <strong>Stop</strong> on your phone. This also
+          stops and saves the recording.
+        </p>
+        <div class="actions">
+          <button id="finished-reading-button" type="button">
+            I've stopped listening
+            <img src="/static/icons/arrow-right.svg" alt="" />
+          </button>
+        </div>
+      </section>
+      <section id="upload-view" class="view hidden">
+        <p class="eyebrow">Step 4 of 5</p>
+        <h2>Send your recording</h2>
+        <ol class="instructions">
+          <li>
+            Open <strong>Settings</strong> in the Android app. Enter the
+            server's <strong>Backend URL</strong> and <strong>Port</strong>,
+            then tap <strong>Save</strong>.
+          </li>
+          <li>
+            Return to <strong>Recordings</strong>. Select only the passage you
+            just read and tap <strong>Upload</strong>. A new recording may take
+            up to 15 seconds to appear.
+          </li>
+        </ol>
+        <dl class="connection-details">
+          <div>
+            <dt>Backend URL</dt>
+            <dd><code id="backend-url"></code></dd>
+          </div>
+          <div>
+            <dt>Port</dt>
+            <dd><code id="backend-port"></code></dd>
+          </div>
+        </dl>
+        <p id="localhost-notice" class="notice hidden">
+          This page is open on localhost. On your phone, use this server's LAN
+          IP address or public hostname instead. The phone must be able to reach
+          that address.
+        </p>
+        <div class="waiting" role="status">
+          <span class="spinner" aria-hidden="true"></span>Waiting for your
+          recording...
         </div>
         <div class="actions">
-          <button id="reveal-created-keys-button" type="button">I understand, show the keys</button>
+          <button id="read-again-button" class="secondary" type="button">
+            Read the passage again
+          </button>
         </div>
       </section>
-
-      <section id="created-keys-view" class="hidden">
-        <div class="view-heading">
-          <div>
-            <h2>Generated Keys</h2>
-            <p>Copy the public key into your app. Keep the private key offline and private.</p>
+      <section
+        id="processing-view"
+        class="view hidden"
+        aria-labelledby="processing-title"
+      >
+        <p class="eyebrow">Step 5 of 5</p>
+        <h2 id="processing-title">Creating your voice profile</h2>
+        <p id="processing-message" role="status" aria-live="polite"></p>
+        <div id="upload-progress-wrap" class="hidden">
+          <progress
+            id="upload-progress"
+            max="1"
+            value="0"
+            aria-label="Recording upload"
+          ></progress>
+          <p id="upload-count"></p>
+          <p class="muted">
+            If the phone reports an upload error, select this recording and tap
+            Upload again to send the remaining chunks.
+          </p>
+        </div>
+        <ol id="processing-steps" class="processing-steps">
+          <li data-stage="receiving">Receive and decrypt recording</li>
+          <li data-stage="validating">Check audio</li>
+          <li data-stage="transcribing">Transcribe speech</li>
+          <li data-stage="aligning">Align spoken words</li>
+          <li data-stage="text_embedding">Create transcript embeddings</li>
+          <li data-stage="voice_embedding">Create voice embedding</li>
+          <li data-stage="saving">Save voice profile</li>
+        </ol>
+        <p id="model-notice" class="muted">
+          The first recording may take longer while speech and embedding models
+          download.
+        </p>
+        <div id="processing-error" class="notice error hidden" role="alert">
+          <p id="processing-error-message"></p>
+          <div class="actions">
+            <button id="retry-upload-button" type="button">
+              Send recording again
+            </button>
+            <button id="retry-reading-button" class="secondary" type="button">
+              Record a new reading
+            </button>
           </div>
-          <button id="hide-created-keys-button" class="secondary" type="button">Hide Keys</button>
-        </div>
-
-        <div class="key-grid">
-          <article class="panel key-card private-card">
-            <h3>Private Key</h3>
-            <div class="copy-box">
-              <button class="copy-button" data-copy-target="private-key-output" type="button" title="Copy private key">Copy</button>
-              <pre id="private-key-output" class="key-output"></pre>
-            </div>
-            <div id="private-key-qr" class="qr"></div>
-          </article>
-
-          <article class="panel key-card">
-            <h3>Public Key</h3>
-            <div class="copy-box">
-              <button class="copy-button" data-copy-target="created-public-key-output" type="button" title="Copy public key">Copy</button>
-              <pre id="created-public-key-output" class="key-output"></pre>
-            </div>
-            <div id="created-public-key-qr" class="qr"></div>
-          </article>
         </div>
       </section>
-
-      <section id="public-key-view" class="hidden">
-        <div id="public-key-summary" class="panel">
-          <h2>Public Key</h2>
-          <p>Server keys already exist. The private key will not be displayed again.</p>
-          <button id="display-public-key-button" type="button">Display Public Key</button>
-        </div>
-
-        <article id="public-key-card" class="panel key-card hidden">
-          <div class="view-heading compact">
-            <div>
-              <h2>Public Key</h2>
-              <p>Copy this key into your app.</p>
-            </div>
-            <button id="hide-public-key-button" class="secondary" type="button">Hide Public Key</button>
-          </div>
-          <div class="copy-box">
-            <button class="copy-button" data-copy-target="public-key-output" type="button" title="Copy public key">Copy</button>
-            <pre id="public-key-output" class="key-output"></pre>
-          </div>
-          <div id="public-key-qr" class="qr"></div>
-        </article>
+      <section id="complete-view" class="view hidden">
+        <p class="eyebrow">Setup complete</p>
+        <h2>Your voice profile is ready</h2>
+        <p>
+          Your recording and personal voice embedding have been saved. You can
+          now record and upload from the VoxVault app.
+        </p>
+        <a class="explorer-link" href="/ui/explorer">
+          Explore conversations
+          <img src="/static/icons/arrow-right.svg" alt="" width="18" height="18" />
+        </a>
+        <details>
+          <summary>Connect another device</summary>
+          <p>
+            Install VoxVault, accept the requested permissions, and scan the
+            public-key QR code. Enter the same server URL and port in Settings.
+          </p>
+          <img
+            id="complete-qr"
+            class="complete-qr"
+            alt="VoxVault public-key setup QR code"
+            width="260"
+            height="260"
+            loading="lazy"
+          />
+        </details>
       </section>
-
-      <section id="error-view" class="panel error hidden">
-        <h2>Error</h2>
-        <pre id="error-output"></pre>
-      </section>
-
-      <section class="panel">
-        <div class="view-heading compact">
-          <div>
-            <h2>Upload Requests</h2>
-            <p>Latest validated requests received by <code>/upload</code>.</p>
-          </div>
-          <button id="refresh-uploads-button" class="secondary" type="button">Refresh</button>
-        </div>
-        <pre id="upload-output" class="upload-output">No uploads received.</pre>
-      </section>
+      <footer>
+        <span id="copy-status" role="status" aria-live="polite"></span>
+      </footer>
     </main>
-
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=7"></script>
   </body>
 </html>
