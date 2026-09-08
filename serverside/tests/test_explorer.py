@@ -97,9 +97,6 @@ class ExplorerTests(unittest.TestCase):
             patch.object(main, "initialize_database", lambda: Base.metadata.create_all(self.engine))
         )
         self.stack.enter_context(patch.object(encryption, "FILEPATH", str(Path(directory) / "private.key")))
-        self.query_embedding = self.stack.enter_context(
-            patch.object(explorer_service, "_query_embedding", return_value=vector(dimensions=TEXT_EMBEDDING_DIM))
-        )
         self.client = self.stack.enter_context(TestClient(main.app))
         self.next_timestamp = 1_700_000_000_000
 
@@ -231,7 +228,7 @@ class ExplorerTests(unittest.TestCase):
             self.assertIsNone(session.get(TranscriptionChunk, removed))
             self.assertEqual(session.scalars(select(TranscriptionWord.chunk_id)).all(), [retained])
             self.assertIsNotNone(session.get(Recording, recording_id))
-        self.assertEqual(self.get("chunks")["total"], 1)
+        self.assertEqual(self.get("chunks", assignment="all")["total"], 1)
         self.assertEqual(self.get(f"persons/{person_id}/chunks")["total"], 1)
         self.assertEqual(self.get(f"persons/{person_id}")["wordCount"], 3)
         self.assertEqual(self.client.get(f"/api/explorer/chunks/{removed}").status_code, 404)
@@ -348,7 +345,6 @@ class ExplorerTests(unittest.TestCase):
             self.assertEqual((page["total"], page["limit"], page["offset"]), (7, 2, offset))
             found.extend(item["id"] for item in page["items"])
         self.assertEqual(found, list(reversed(ids)))
-        self.query_embedding.assert_not_called()
 
     def test_literal_search_escapes_wildcards_and_filters_assignments(self):
         person_id = self.person()
@@ -360,18 +356,20 @@ class ExplorerTests(unittest.TestCase):
             self.assertEqual([item["id"] for item in page["items"]], [literal], q)
         self.assertEqual(self.get("chunks", assignment="assigned")["total"], 1)
         self.assertEqual(self.get("chunks", assignment="unassigned")["total"], 2)
-        self.query_embedding.assert_not_called()
 
-    def test_semantic_search_ranks_by_text_cosine_similarity_and_pages(self):
-        closest = self.chunk(spoken="different wording", text_vector=vector(4, 0, TEXT_EMBEDDING_DIM))
-        middle = self.chunk(text_vector=vector(1, 1, TEXT_EMBEDDING_DIM))
-        farthest = self.chunk(text_vector=vector(-1, 0, TEXT_EMBEDDING_DIM))
-        page = self.get("chunks", q="free text prompt", mode="semantic", limit=2)
-        self.assertEqual([item["id"] for item in page["items"]], [closest, middle])
-        self.assertEqual(page["total"], 3)
-        second = self.get("chunks", q="free text prompt", mode="semantic", limit=2, offset=2)
-        self.assertEqual([item["id"] for item in second["items"]], [farthest])
-        self.query_embedding.assert_called_with("free text prompt")
+    def test_default_view_is_unassigned_and_search_is_text_only(self):
+        person_id = self.person()
+        unassigned = self.chunk(spoken="Thursday meeting")
+        assigned = self.chunk(spoken="Thursday meeting", person_id=person_id)
+        self.chunk(spoken="different wording", text_vector=vector(4, 0, TEXT_EMBEDDING_DIM))
+        page = self.get("chunks", q="THURSDAY")
+        self.assertEqual([item["id"] for item in page["items"]], [unassigned])
+        self.assertIsNone(page["items"][0]["similarity"])
+        self.assertEqual(self.get("chunks")["total"], 2)
+        self.assertEqual(self.get("chunks", assignment="all")["total"], 3)
+        self.assertEqual([item["id"] for item in self.get("chunks", q="Thursday", assignment="assigned")["items"]], [assigned])
+        response = self.client.get("/api/explorer/chunks", params={"q": "Thursday", "mode": "semantic"})
+        self.assertEqual(response.status_code, 422)
 
     def test_person_list_includes_empty_profiles_and_ranks_comparison(self):
         opposite = self.person("Opposite", vector(-1, 0))

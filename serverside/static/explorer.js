@@ -7,7 +7,7 @@
   const state = {
     people: [], person: null, chunk: null, known: [], knownChunkId: null,
     searchOffset: 0, knownOffset: 0, candidateOffset: 0,
-    searchQuery: "", searchMode: "semantic", searchAssignment: "all",
+    searchQuery: "", searchAssignment: "unassigned",
     source: "chunk", scope: "other", busy: false,
   };
   const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0 };
@@ -218,7 +218,7 @@
     $("#search-summary").textContent = "Searching conversations...";
     $("#search-submit").disabled = true;
     try {
-      const params = new URLSearchParams({ q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment, offset, limit: pageSize });
+      const params = new URLSearchParams({ q: state.searchQuery, mode: "text", assignment: state.searchAssignment, offset, limit: pageSize });
       const page = await request(`/chunks?${params}`);
       if (version !== epochs.search) return;
       if (page.total && offset >= page.total) return await loadSearch(Math.floor((page.total - 1) / pageSize) * pageSize);
@@ -556,12 +556,10 @@
   $("#search-form").addEventListener("submit", event => {
     event.preventDefault();
     state.searchQuery = $("#search-query").value.trim();
-    state.searchMode = $("#search-mode").value;
     state.searchAssignment = $("#search-assignment").value;
     loadSearch(0);
   });
   $("#search-assignment").addEventListener("change", () => $("#search-form").requestSubmit());
-  $("#search-mode").addEventListener("change", () => $("#search-form").requestSubmit());
   $("#person-filter").addEventListener("input", renderPeople);
   $("#comparison-filter").addEventListener("input", renderComparison);
   $("#close-inspector").addEventListener("click", () => $("#inspector").close());

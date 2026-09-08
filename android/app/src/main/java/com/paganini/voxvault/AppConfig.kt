@@ -41,14 +41,15 @@ object AppConfig {
             get() = ((SAMPLE_RATE * PRE_RECORDING_BUFFER_LENGTH_MS) / 1000).toInt()
 
         const val RECORDING_CHUNK_SIZE_MS = 120000L
+        val RECORDING_MINIMAL_SPEECH_DURATION_MS = 1000
     }
 
     object VAD {
         val SAMPLE_RATE = SampleRate.SAMPLE_RATE_16K
         val FRAME_SIZE = FrameSize.FRAME_SIZE_1536
         val MODE = Mode.NORMAL
-        const val SILENCE_DURATION_MS = 500
-        const val SPEECH_DURATION_MS = 250
+        const val SILENCE_DURATION_MS = 50
+        const val SPEECH_DURATION_MS = 50
     }
 
     object UI {

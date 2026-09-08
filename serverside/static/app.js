@@ -16,6 +16,65 @@ let deviceKeyLoaded = false;
 let busy = false;
 let pollTimer = null;
 let refreshPromise = null;
+let languageChoices = null;
+let languagesDirty = false;
+
+function selectedLanguages() {
+  return [...document.querySelectorAll("#language-choices input:checked")]
+    .map((input) => input.value);
+}
+
+function renderLanguageSummary() {
+  const selected = selectedLanguages();
+  setText("#selected-languages", selected.length
+    ? languageChoices.filter((language) => selected.includes(language.code))
+      .map((language) => language.name).join(", ")
+    : "No languages selected");
+}
+
+async function renderLanguages() {
+  if (!languageChoices) {
+    const data = await requestJson("/api/setup/languages");
+    languageChoices = data.languages;
+    for (const language of languageChoices) {
+      const label = document.createElement("label");
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = language.code;
+      label.append(input, document.createTextNode(language.name));
+      $("#language-choices").append(label);
+    }
+  }
+  if (!languagesDirty) {
+    document.querySelectorAll("#language-choices input").forEach((input) => {
+      input.checked = status.expectedLanguages.includes(input.value);
+    });
+  }
+  renderLanguageSummary();
+  $("#language-settings").classList.remove("hidden");
+}
+
+async function saveLanguages() {
+  const selected = selectedLanguages();
+  if (!selected.length) throw new Error("Select at least one spoken language.");
+  const data = await requestJson("/api/setup/languages", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expectedLanguages: selected }),
+  });
+  status.expectedLanguages = data.expectedLanguages;
+  languagesDirty = false;
+  setText("#languages-status", "Languages saved.");
+  if (status.stage === "reading") renderReading();
+}
+
+function renderReading() {
+  const english = status.expectedLanguages.includes("en");
+  $("#english-reading-instructions").classList.toggle("hidden", !english);
+  $("#other-reading-instructions").classList.toggle("hidden", english);
+  setText("#reading-text", english ? status.readingText
+    : "Describe your plans for the day, a recent conversation, and a place you know well. Include the details you would share with a friend.");
+}
 
 function setText(selector, value) {
   const element = $(selector);
@@ -131,6 +190,7 @@ function renderProgress() {
 }
 
 async function render() {
+  await renderLanguages();
   if (!status.keysExist) {
     deviceKeyLoaded = false;
     showView("setup-view", "keys");
@@ -140,7 +200,7 @@ async function render() {
     await loadDeviceKey();
     showView("device-view", "device");
   } else if (status.stage === "reading") {
-    setText("#reading-text", status.readingText);
+    renderReading();
     showView("reading-view", "reading");
   } else if (status.stage === "awaiting_upload") {
     renderConnection();
@@ -194,7 +254,7 @@ function action(selector, callback) {
     busy = true;
     document
       .querySelectorAll(
-        ".actions button, #create-keys-button, #reveal-created-keys-button",
+        ".actions button, #create-keys-button, #reveal-created-keys-button, #language-choices input",
       )
       .forEach((button) => (button.disabled = true));
     $("#error-view").classList.add("hidden");
@@ -206,13 +266,14 @@ function action(selector, callback) {
     } finally {
       busy = false;
       document
-        .querySelectorAll("button")
+        .querySelectorAll("button, #language-choices input")
         .forEach((button) => (button.disabled = false));
     }
   });
 }
 
 async function advance(step) {
+  if (languagesDirty) await saveLanguages();
   const next = await requestJson("/api/setup/step", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -249,6 +310,12 @@ action("#read-again-button", () => advance("reading"));
 action("#retry-reading-button", () => advance("reading"));
 action("#retry-upload-button", () => advance("awaiting_upload"));
 action("#retry-connection-button", refresh);
+action("#save-languages-button", saveLanguages);
+$("#language-choices").addEventListener("change", () => {
+  languagesDirty = true;
+  renderLanguageSummary();
+  setText("#languages-status", "Unsaved changes");
+});
 
 document.querySelectorAll("[data-copy-target]").forEach((button) => {
   button.addEventListener("click", async () => {

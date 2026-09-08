@@ -19,19 +19,23 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.children
+import androidx.core.view.doOnLayout
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.button.MaterialButtonToggleGroup
 import com.paganini.voxvault.viewModel.MainViewModel
 import com.paganini.voxvault.dataClass.Recording
 import com.paganini.voxvault.service.ListeningService
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import com.paganini.voxvault.service.UploadService
+import com.paganini.voxvault.upload.UploadEntry
+import com.paganini.voxvault.upload.UploadPhase
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
-import kotlin.time.Duration.Companion.seconds
 
 class MainActivity : AppCompatActivity() {
 
@@ -40,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var settingsManager: SettingsManager
     private var currentService: ListeningService? = null
     private val displayedRecordings = mutableMapOf<String, Recording>()
+    private var uploads = emptyMap<String, UploadEntry>()
     // endregion
 
     // region Lifecycle
@@ -62,6 +67,7 @@ class MainActivity : AppCompatActivity() {
 
         // Recording Observation
         setupRecordingObservation()
+        setupUploadObservation()
         viewModel.refreshRecordings()
 
         // Initial State / Permissions
@@ -76,6 +82,22 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         viewModel.bindService()
         viewModel.refreshRecordings()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch {
+            try {
+                if (viewModel.uploadState.first().entries.any { it.pending } &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    UploadService.resume(this@MainActivity)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                Toast.makeText(this@MainActivity, error.message, Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     override fun onStop() {
@@ -177,7 +199,85 @@ class MainActivity : AppCompatActivity() {
                 if (viewModel.currentSortOrder == MainViewModel.SortOrder.DATE) R.id.sortByDate else R.id.sortByDuration
             )
             updateSelectAllButtonText()
+            renderUploads()
         }
+    }
+
+    private fun setupUploadObservation() {
+        findViewById<View>(R.id.cancelUploadsButton).setOnClickListener { UploadService.cancel(this) }
+        findViewById<View>(R.id.deleteUploadedButton).setOnClickListener { confirmDeleteUploaded() }
+        viewModel.deletingUploaded.observe(this) { updateSelectAllButtonText() }
+        viewModel.uploadCleanupResult.observe(this) { result ->
+            if (result != null) {
+                val message = result.error ?: if (result.failed > 0) {
+                    getString(R.string.delete_uploaded_partial, result.deleted, result.failed)
+                } else {
+                    resources.getQuantityString(R.plurals.deleted_uploaded, result.deleted, result.deleted)
+                }
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                viewModel.clearUploadCleanupResult()
+            }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                try {
+                    viewModel.uploadState.collect { journal ->
+                        uploads = journal.entries.associateBy { it.name }
+                        renderUploads()
+                    }
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    Toast.makeText(this@MainActivity, "Cannot read upload state: ${error.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun renderUploads() {
+        val parent = findViewById<LinearLayout>(R.id.recordingLinearLayout)
+        parent.children.forEach { row ->
+            val entry = uploads[(row.tag as Recording).name]
+            row.findViewById<CheckBox>(R.id.recordingCheckbox).apply {
+                isEnabled = entry?.pending != true
+            }
+            row.findViewById<TextView>(R.id.uploadStatus).apply {
+                visibility = if (entry == null) View.GONE else View.VISIBLE
+                text = when (entry?.phase) {
+                    null -> ""
+                    UploadPhase.QUEUED -> getString(R.string.upload_queued)
+                    UploadPhase.PREPARING -> getString(R.string.upload_preparing)
+                    UploadPhase.UPLOADING -> getString(R.string.upload_chunk_progress, entry.currentChunk, entry.files.size)
+                    UploadPhase.RETRYING -> getString(R.string.upload_retrying, entry.currentChunk, entry.files.size)
+                    UploadPhase.COMPLETED -> getString(R.string.upload_completed)
+                    UploadPhase.FAILED -> getString(R.string.upload_failed, entry.error ?: "")
+                    UploadPhase.CANCELLED -> getString(R.string.upload_cancelled)
+                }
+            }
+            row.doOnLayout {
+                val progress = row.findViewById<View>(R.id.uploadProgressBar)
+                progress.layoutParams.width = (row.width * (entry?.progress ?: 0f)).toInt()
+                progress.requestLayout()
+            }
+        }
+        findViewById<View>(R.id.cancelUploadsButton).visibility =
+            if (uploads.values.any { it.pending }) View.VISIBLE else View.GONE
+        updateSelectAllButtonText()
+    }
+
+    private fun uploadedRecordingNames(): Set<String> = displayedRecordings.keys.filterTo(mutableSetOf()) {
+        uploads[it]?.phase == UploadPhase.COMPLETED
+    }
+
+    private fun confirmDeleteUploaded() {
+        val names = uploadedRecordingNames()
+        if (names.isEmpty() || viewModel.deletingUploaded.value == true) return
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.delete_uploaded_title)
+            .setMessage(resources.getQuantityString(R.plurals.delete_uploaded_confirmation, names.size, names.size))
+            .setPositiveButton(R.string.delete) { _, _ -> viewModel.deleteUploadedRecordings(names) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun syncUIWithService(service: ListeningService, toggle: MaterialButton) {
@@ -324,58 +424,10 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
-            for (recView in selectedRecordingViews) {
-                recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled = false
-                updateSelectAllButtonText()
-                lifecycleScope.launch(Dispatchers.IO) {
-                    val recording: Recording = recView.tag as Recording
-                    val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
-
-                    withContext(Dispatchers.Main) {
-                        recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled = false
-                        progressBar.layoutParams.width = 0
-                        recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
-                    }
-
-                    val result =
-                        viewModel.httpCommunicationService.sendRecording(recording) { current, total ->
-                            lifecycleScope.launch(Dispatchers.Main) {
-                                val progress = current.toFloat() / total
-                                val progressBar =
-                                    recView.findViewById<View>(R.id.uploadProgressBar)
-                                progressBar.layoutParams.width =
-                                    (recView.width * progress).toInt()
-                                progressBar.requestLayout()
-                            }
-                        }
-
-                    withContext(Dispatchers.Main) {
-                        if (result.startsWith("Failure") || result.startsWith("Error")) {
-                            Toast.makeText(this@MainActivity, result, Toast.LENGTH_SHORT).show()
-                            recView.findViewById<CheckBox>(R.id.recordingCheckbox).isEnabled =
-                                true
-                            progressBar.layoutParams.width = 0
-                            recView.findViewById<View>(R.id.uploadProgressBar).requestLayout()
-                        } else {
-                            // Ensure full green
-                            val progressBar = recView.findViewById<View>(R.id.uploadProgressBar)
-                            progressBar.layoutParams.width = recView.width
-                            progressBar.requestLayout()
-
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Upload succeeded: ${recording.name}. Deleting in 5s.",
-                                Toast.LENGTH_SHORT
-                            ).show()
-
-                            launch {
-                                delay(5.seconds)
-                                deleteRecording(recView)
-                            }
-                        }
-                        updateSelectAllButtonText()
-                    }
-                }
+            try {
+                UploadService.enqueue(this, selectedRecordingViews.map { (it.tag as Recording).name })
+            } catch (error: RuntimeException) {
+                Toast.makeText(this, error.message ?: "Cannot start upload service", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -403,13 +455,19 @@ class MainActivity : AppCompatActivity() {
             text = if (selected > 0) getString(R.string.selected_recordings, selected) else getString(R.string.select_all)
         }
         for (id in listOf(R.id.uploadButton, R.id.deleteButton)) findViewById<View>(id).apply {
-            isEnabled = selected > 0
+            isEnabled = selected > 0 && viewModel.deletingUploaded.value != true
             alpha = if (isEnabled) 1f else 0.35f
         }
         findViewById<View>(R.id.emptyRecordings).visibility = if (parent.childCount == 0) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.recordingSummary).text = getString(
             R.string.recording_summary, parent.childCount, formatDuration(displayedRecordings.values.sumOf { it.duration })
         )
+        val uploadedCount = uploadedRecordingNames().size
+        findViewById<MaterialButton>(R.id.deleteUploadedButton).apply {
+            isEnabled = uploadedCount > 0 && viewModel.deletingUploaded.value != true
+            text = if (viewModel.deletingUploaded.value == true) getString(R.string.deleting_uploaded)
+                else getString(R.string.delete_uploaded_count, uploadedCount)
+        }
     }
     // endregion
 
@@ -462,6 +520,7 @@ class MainActivity : AppCompatActivity() {
     fun deleteRecording(recordingView: View) {
         // We use the 'tag' we set in Recording.getView to get the exact folder name
         val folderName = (recordingView.tag as? Recording)?.name
+        if (uploads[folderName]?.pending == true) return
         val recordingDir = File(filesDir, "recordings/$folderName")
 
         if (recordingDir.exists()) {
@@ -471,6 +530,7 @@ class MainActivity : AppCompatActivity() {
         val parent = recordingView.parent as? ViewGroup
         parent?.removeView(recordingView)
         displayedRecordings.remove(folderName)
+        folderName?.let { lifecycleScope.launch { viewModel.uploadQueue.forget(it) } }
         updateSelectAllButtonText()
     }
     // endregion

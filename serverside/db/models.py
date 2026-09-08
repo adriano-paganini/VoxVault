@@ -79,6 +79,9 @@ class SetupState(Base):
     person_id: Mapped[int | None] = mapped_column(ForeignKey("person.id"))
     error: Mapped[str | None] = mapped_column(Text)
     history: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    expected_languages: Mapped[list[str]] = mapped_column(
+        JSON, default=lambda: ["en"], server_default='["en"]',
+    )
 
 
 class TranscriptionChunk(Base):

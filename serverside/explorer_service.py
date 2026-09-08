@@ -1,16 +1,12 @@
 """Conversation discovery and confirmed speaker associations."""
 
-import logging
 import math
 
 from sqlalchemy import and_, case, func, literal, or_, select
 from sqlalchemy.orm import joinedload, selectinload
 
 from db.database import SessionLocal
-from db.models import Person, Recording, TEXT_EMBEDDING_DIM, TranscriptionChunk, VOICE_EMBEDDING_DIM
-
-
-logger = logging.getLogger(__name__)
+from db.models import Person, Recording, TranscriptionChunk, VOICE_EMBEDDING_DIM
 
 
 class ExplorerError(ValueError):
@@ -198,39 +194,19 @@ def _chunk_page(session, conditions, similarity, limit, offset, order_by=None):
     }
 
 
-def _query_embedding(q):
-    try:
-        import audio_processer
-        from main import processing_lock
-
-        with processing_lock:
-            vector = _valid_vector(audio_processer.create_query_embedding(q), TEXT_EMBEDDING_DIM)
-        if vector is None:
-            raise ValueError("The text embedding model returned an invalid vector.")
-        return vector
-    except Exception as exc:
-        logger.exception("Conversation semantic search could not generate a query embedding")
-        raise ExplorerError(503, "Semantic search is unavailable. Try text search or retry shortly.") from exc
-
-
-def search_chunks(q="", mode="semantic", assignment="all", limit=25, offset=0):
+def search_chunks(q="", mode="text", assignment="unassigned", limit=25, offset=0):
+    if mode != "text":
+        raise ExplorerError(422, "Only text search is supported.")
     conditions = []
     if assignment == "assigned":
         conditions.append(TranscriptionChunk.person_id.is_not(None))
     elif assignment == "unassigned":
         conditions.append(TranscriptionChunk.person_id.is_(None))
-    similarity = None
-    order_by = None
     q = q.strip()
     if q:
-        if mode == "text":
-            conditions.append(TranscriptionChunk.text.icontains(q, autoescape=True))
-        else:
-            similarity = _similarity(TranscriptionChunk.text_embedding, _query_embedding(q))
-            conditions.append(similarity.is_not(None))
-            order_by = [similarity.desc().nullslast(), TranscriptionChunk.id]
+        conditions.append(TranscriptionChunk.text.icontains(q, autoescape=True))
     with SessionLocal() as session:
-        return _chunk_page(session, conditions, similarity, limit, offset, order_by)
+        return _chunk_page(session, conditions, None, limit, offset)
 
 
 def get_chunk(chunk_id):

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Conversation Explorer | VoxVault</title>
     <link rel="stylesheet" href="/static/style.css?v=7" />
-    <link rel="stylesheet" href="/static/explorer.css?v=2" />
+    <link rel="stylesheet" href="/static/explorer.css?v=3" />
   </head>
   <body class="explorer">
     <main class="shell explorer-shell">
@@ -22,8 +22,7 @@
       <section id="search-view" aria-label="Search conversation chunks">
         <form id="search-form" class="search-form">
           <div class="query-field"><label for="search-query">Conversation search</label><input id="search-query" name="q" type="search" placeholder="Search your conversations" autocomplete="off" maxlength="2000" /></div>
-          <div><label for="search-mode">Search type</label><select id="search-mode"><option value="semantic">Meaning</option><option value="text">Text</option></select></div>
-          <div><label for="search-assignment">Association</label><select id="search-assignment"><option value="all">All chunks</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></div>
+          <div><label for="search-assignment">Association</label><select id="search-assignment"><option value="unassigned">Unassigned</option><option value="all">All chunks</option><option value="assigned">Assigned</option></select></div>
           <button id="search-submit" type="submit"><img src="/static/icons/search.svg" alt="" />Search</button>
         </form>
         <div class="results-heading"><h2 id="search-summary" role="status">Loading conversations...</h2><div class="confidence-legend" aria-label="Transcription confidence"><span>Word confidence</span><span class="confidence-high">90%+</span><span class="confidence-medium">60-89%</span><span class="confidence-low">Below 60%</span><span class="confidence-unknown">Unknown</span></div></div>
@@ -74,6 +73,6 @@
         <button class="danger" value="delete"><img src="/static/icons/trash-2.svg" alt="" />Delete chunk</button>
       </form>
     </dialog>
-    <script src="/static/explorer.js?v=2" defer></script>
+    <script src="/static/explorer.js?v=3" defer></script>
   </body>
 </html>

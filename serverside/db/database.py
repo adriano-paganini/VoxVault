@@ -1,7 +1,7 @@
 import os
 import time
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
@@ -18,6 +18,16 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine)
 
 
+def migrate_setup_languages(connection):
+    if "expected_languages" not in {
+        column["name"] for column in inspect(connection).get_columns("setup_state")
+    }:
+        connection.execute(text(
+            "ALTER TABLE setup_state ADD COLUMN expected_languages JSON "
+            "NOT NULL DEFAULT '[\"en\"]'"
+        ))
+
+
 def initialize_database() -> None:
     retries = int(os.getenv("DATABASE_INIT_RETRIES", "30"))
     retry_delay = float(os.getenv("DATABASE_INIT_RETRY_DELAY_SECONDS", "2"))
@@ -28,6 +38,8 @@ def initialize_database() -> None:
                 connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
             Base.metadata.create_all(bind=engine)
+            with engine.begin() as connection:
+                migrate_setup_languages(connection)
             return
         except OperationalError:
             if attempt == retries:

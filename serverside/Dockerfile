@@ -29,4 +29,4 @@ RUN apt-get update \
 
 EXPOSE 6100
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "6100"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "6100", "--workers", "1"]

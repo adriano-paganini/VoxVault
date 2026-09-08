@@ -63,7 +63,31 @@ def get_status():
             "error": state.error,
             "history": state.history,
             "readingText": READING_TEXT,
+            "expectedLanguages": state.expected_languages,
         }
+
+
+def get_expected_languages():
+    with SessionLocal() as session:
+        return tuple(session.get(SetupState, 1).expected_languages)
+
+
+def available_languages():
+    # This module contains constants and utilities; it does not load ML models.
+    from whisperx.utils import LANGUAGES
+
+    return [{"code": code, "name": name.title()}
+            for code, name in sorted(LANGUAGES.items(), key=lambda item: item[1])]
+
+
+def set_expected_languages(languages):
+    supported = {language["code"] for language in available_languages()}
+    normalized = list(dict.fromkeys(language.strip().lower() for language in languages))
+    if not normalized or any(language not in supported for language in normalized):
+        raise ValueError("Select at least one valid Whisper language code.")
+    with SessionLocal.begin() as session:
+        _state(session).expected_languages = normalized
+    return normalized
 
 
 def advance(step):

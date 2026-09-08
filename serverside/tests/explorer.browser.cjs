@@ -8,6 +8,7 @@ const staticRoot = path.resolve(__dirname, '../static');
 async function fixture(page) {
   let failDelete = false;
   let deletions = 0;
+  const searches = [];
   let chunks = Array.from({ length: 26 }, (_, index) => ({
     id: index + 1, recordingId: index + 1, recordingTimestamp: 1700000000000 + index * 1000,
     chunkIndex: 0, language: 'en', text: `Conversation ${index + 1} about Thursday's meeting.`,
@@ -76,6 +77,7 @@ async function fixture(page) {
       return json(profile(person));
     }
     if (endpoint === '/chunks' || endpoint === '/similar') {
+      if (endpoint === '/chunks') searches.push(Object.fromEntries(url.searchParams));
       let items = [...chunks].reverse();
       const assignment = url.searchParams.get('assignment');
       if (assignment === 'assigned') items = items.filter(chunk => chunk.personId !== null);
@@ -85,7 +87,7 @@ async function fixture(page) {
     }
     throw new Error(`Unexpected request: ${request.method()} ${url.pathname}`);
   });
-  return { failDeletion: value => { failDelete = value; }, deletionCount: () => deletions };
+  return { failDeletion: value => { failDelete = value; }, deletionCount: () => deletions, searches };
 }
 
 async function fits(page) {
@@ -99,6 +101,24 @@ async function run(browser, viewport) {
   page.on('pageerror', error => errors.push(error.message));
   const data = await fixture(page);
   await page.goto('http://voxvault.test/ui/explorer?app=1');
+  await page.waitForFunction(() => document.querySelector('#search-results article:last-child'));
+  assert.equal(await page.locator('#search-mode').count(), 0);
+  assert.equal(await page.locator('#search-assignment').inputValue(), 'unassigned');
+  assert.equal(await page.locator('#search-results article').count(), 24);
+  assert.equal(data.searches[0].mode, 'text');
+  assert.equal(data.searches[0].assignment, 'unassigned');
+  await fits(page);
+  if (process.env.VOXVAULT_SCREENSHOT_DIR) {
+    await fs.mkdir(process.env.VOXVAULT_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.VOXVAULT_SCREENSHOT_DIR, `explorer-${viewport.width}.png`) });
+  }
+  await page.locator('#search-query').fill('Thursday');
+  await page.locator('#search-form').evaluate(form => form.requestSubmit());
+  await page.waitForFunction(() => document.querySelector('#search-results').getAttribute('aria-busy') === 'false');
+  assert.equal(data.searches.at(-1).q, 'Thursday');
+  assert.equal(data.searches.at(-1).mode, 'text');
+  await page.locator('#search-query').fill('');
+  await page.locator('#search-assignment').selectOption('all');
   await page.waitForFunction(() => document.querySelector('#search-results').children.length === 25);
   await fits(page);
   assert.equal(await page.locator('.explorer-heading').isVisible(), false);

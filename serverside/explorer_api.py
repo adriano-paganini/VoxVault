@@ -67,8 +67,8 @@ class PersonAssignment(BaseModel):
 @router.get("/chunks")
 def chunks(
     q: str = Query(default="", max_length=2000),
-    mode: Literal["semantic", "text"] = "semantic",
-    assignment: Literal["all", "assigned", "unassigned"] = "all",
+    mode: Literal["text"] = "text",
+    assignment: Literal["all", "assigned", "unassigned"] = "unassigned",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):

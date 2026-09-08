@@ -18,9 +18,12 @@ The root URL also opens setup. Existing private keys are reused.
 
 1. Create server keys if needed, then install the VoxVault Android app and
    accept its requested permissions. Scan the public-key QR code to save the
-   key in the app.
+   key in the app. Select **Expected spoken languages** on the setup page and
+   save, for example English and German. These settings remain editable on
+   `/ui` after setup is complete.
 2. Click **Next step**, tap **Listen** on the phone, and read the English
-   passage at a natural pace, approximately 60-90 seconds. Keep pauses short
+   passage if English is selected. Otherwise, read or speak in one of your
+   selected languages about the suggested topics, approximately 60-90 seconds. Keep pauses short
    so the phone saves one recording. Tap **Stop** when finished, then click
    **I've stopped listening** on the website.
 3. In the phone's **Settings**, enter the **Backend URL** and **Port**, and
@@ -44,7 +47,8 @@ environment variables: `sudo docker compose up -d`.
 
 Setup state, recordings, and the personal voice profile (`Me`) are stored
 in PostgreSQL's existing `voxvault-postgres` volume. The `setup_state` table
-is created automatically without changing existing tables. Keys remain in
+is created automatically, and existing installations receive an
+`expected_languages` JSON column with an English default. Keys remain in
 the configured host key directory, and downloaded models persist in the
 `voxvault-models` volume. Rebuilding containers preserves these volumes;
 `sudo docker compose down -v` removes database and model volumes, but
@@ -127,10 +131,12 @@ app, and repeat the voice setup with a new recording.
 
 Open **Archive** from the phone's Recordings screen. It uses the server address
 and port saved in Settings and opens the shared conversation explorer inside
-the app. The updated server must be reachable from the phone. Search by text
-or meaning, inspect voice similarity, create or rename people, and assign or
+the app. The updated server must be reachable from the phone. Search by text,
+inspect voice similarity, create or rename people, and assign or
 unassign chunks there. Android Back closes the current dialog before returning
 to recordings. Archive browsing does not require microphone permission.
+The initial chunk view shows Unassigned; the Association filter also offers
+All chunks and Assigned. Meaning search has been removed.
 
 The trash action on each chunk asks for confirmation. The
 `DELETE /api/explorer/chunks/{chunk_id}` endpoint returns `204` on success and
@@ -140,6 +146,9 @@ the same transaction. Removing the last sample clears the profile but keeps
 the person. The recording identity stays in the database to prevent a repeat
 upload from recreating deleted chunks. Local recordings on the phone are
 managed separately from archive chunks.
+Use **Delete uploaded (N)** on the phone's Recordings screen to remove all
+successfully uploaded local recordings after confirmation. Failed, cancelled,
+and pending uploads are excluded. This action does not delete server data.
 
 ### Model Processing
 
@@ -150,8 +159,49 @@ It expects one speaker, 30-180 seconds of audio, and at least 50 aligned
 words. Transcription and embedding failures appear on the setup page with
 retry options. Refreshing the page resumes the saved step. If the container
 restarts during an upload or processing, the page prompts for a resend.
-Chunk buffers are held in memory, so run one Uvicorn worker, as in the
-provided Dockerfile.
+Run exactly one Uvicorn process (`--workers 1`), as in the provided Dockerfile.
+The application owns one background audio worker, which processes completed
+recordings sequentially outside the HTTP thread pool. Startup is lazy: WhisperX
+and its VAD, Pyannote diarization, SpeechBrain, and multilingual E5 each load on
+first use and are reused. E5 initialization and inference are serialized.
+
+Completed PCM recordings wait in a private temporary directory on disk; the
+queue holds only paths and recording metadata. Files are deleted after each
+job, including failed jobs. Graceful shutdown stops accepting jobs and drains
+the queue before joining the worker. Allow enough shutdown time for queued
+inference to finish. This is an in-process queue, not a durable task broker:
+after a forced termination, resend unfinished recordings from the phone.
+Orphaned `voxvault-processing-*` directories may be removed while the server
+is stopped. Incomplete uploads still use the existing in-memory chunk buffers.
+
+`VOXVAULT_PROCESSING_DIR` optionally selects an existing writable spool parent
+directory; by default it is the server working directory (the container's
+`/app`). Use a disk filesystem, not a RAM-backed tmpfs, and reserve disk space
+for the upload backlog. Do not expose the spool as static content or include
+it in backups; it contains decrypted audio until each job finishes.
+
+Expected languages use standard Whisper codes, saved through
+`PUT /api/setup/languages`, for example `{"expectedLanguages":["en","de"]}`.
+One expected language bypasses detection. With multiple languages, detection
+uses up to 30 seconds of VAD speech and accepts only a configured language
+with confidence at least `0.7`. Set `WHISPERX_LANGUAGE_MIN_CONFIDENCE` between
+0 and 1 to adjust this threshold. Short speech is allowed; silence, unreliable
+or unexpected languages, unsupported alignment languages, and transcripts
+without usable aligned words are skipped without saving empty recordings.
+Enrollment follows the same language rules. Setup offers its existing English
+passage when English is selected, or topics to speak about in a selected
+language otherwise; the existing duration and voice-profile checks still apply.
+
+Alignment models load on demand only for accepted languages and stay cached
+between recordings. Changes to expected languages take effect at the start of
+the next job; models for removed languages are evicted then. Per-recording
+waveforms, results, and embeddings stay local to the job, with inference mode
+enabled and PCM views used for chunk embeddings. No per-job garbage collection
+or CUDA cache flushing is used. Memory should plateau once the models used by
+the configuration have loaded; actual peaks still depend on recording length,
+batch size, device, and models. Queue, model initialization, skip, and completion
+messages appear in the server logs; recent upload events include `skipped` or
+`failed`, and enrollment failures retain the existing setup retry flow.
 
 Inspect service health and processing errors with:
 
@@ -180,6 +230,7 @@ deployment data. With Playwright installed in an external tools directory:
 npm install --prefix /tmp/voxvault-browser-tests playwright
 /tmp/voxvault-browser-tests/node_modules/.bin/playwright install chromium
 NODE_PATH=/tmp/voxvault-browser-tests/node_modules node tests/explorer.browser.cjs
+NODE_PATH=/tmp/voxvault-browser-tests/node_modules node tests/setup.browser.cjs
 ```
 
 These check deletion, failure recovery, speaker management, and narrow and wide

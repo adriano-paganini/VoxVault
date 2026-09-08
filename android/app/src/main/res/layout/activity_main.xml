@@ -98,12 +98,31 @@
             android:contentDescription="@string/upload"
             android:src="@android:drawable/ic_menu_upload" />
         <ImageButton
+            android:id="@+id/cancelUploadsButton"
+            style="@style/VoxVault.IconButton"
+            android:contentDescription="@string/cancel_uploads"
+            android:visibility="gone"
+            android:src="@android:drawable/ic_menu_close_clear_cancel" />
+        <ImageButton
             android:id="@+id/deleteButton"
             style="@style/VoxVault.IconButton"
             android:contentDescription="@string/delete"
             android:src="@android:drawable/ic_menu_delete"
             app:tint="?attr/colorError" />
     </LinearLayout>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/deleteUploadedButton"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:minHeight="48dp"
+        android:enabled="false"
+        android:text="@string/delete_uploaded_title"
+        app:icon="@android:drawable/ic_menu_delete"
+        app:iconGravity="textStart" />
 
     <FrameLayout
         android:layout_width="match_parent"
