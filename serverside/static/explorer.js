@@ -7,7 +7,7 @@
   const state = {
     people: [], person: null, chunk: null, known: [], knownChunkId: null,
     searchOffset: 0, knownOffset: 0, candidateOffset: 0,
-    searchQuery: "", searchAssignment: "all", searchMode: "semantic",
+    searchQuery: "", searchAssignment: "all",
     view: "conversations", conversation: null, conversationId: null, conversationsOffset: 0,
     context: {}, matchIndex: 0, speakerChunk: null, speakerPeople: [],
     source: "chunk", scope: "other", busy: false,
@@ -224,7 +224,7 @@
     $("#search-summary").textContent = "Searching conversations...";
     $("#search-submit").disabled = true;
     try {
-      const params = new URLSearchParams({ q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment, offset, limit: pageSize });
+      const params = new URLSearchParams({ q: state.searchQuery, assignment: state.searchAssignment, offset, limit: pageSize });
       const page = await request(`/conversations?${params}`);
       if (version !== epochs.search) return;
       if (page.total && offset >= page.total) return await loadSearch(Math.floor((page.total - 1) / pageSize) * pageSize);
@@ -256,7 +256,7 @@
     content.append(element("span", "muted", `${count(item.chunkCount, "segment")} / ${count(item.wordCount, "word")} / ${timecode(item.durationMs)}${item.language ? ` / ${item.language}` : ""}`));
     content.append(element("span", "conversation-preview", item.preview || "No transcript available."));
     if (searched && state.searchQuery) {
-      content.append(element("span", "match-count", state.searchMode === "conversation" ? "Conversation theme match" : count(item.matchedChunkIds.length, "matching segment")));
+      content.append(element("span", "match-count", count(item.matchedChunkIds.length, "matching segment")));
       if (finite(item.similarity)) content.append(score(item.similarity, "Text cosine similarity"));
     }
     row.append(content, icon("arrow-right"));
@@ -289,18 +289,19 @@
   }
 
   function dialogueChunk(chunk) {
-    const node = element("article", `dialogue-segment${chunk.matched ? " matched" : ""}`);
+    const primary = chunk.matchType === "keyword";
+    const node = element("article", `dialogue-segment${chunk.matched ? ` matched ${primary ? "primary-match" : "secondary-match"}` : ""}`);
     node.id = `segment-${chunk.id}`;
     node.dataset.chunkId = chunk.id;
     node.tabIndex = -1;
     const top = element("div", "dialogue-speaker");
-    const speaker = button(chunk.personId == null ? "Assign speaker" : ownerName(chunk), "users", () => openSpeakerPicker(chunk), "secondary compact");
+    const speaker = button(chunk.personId == null ? "Assign speaker" : ownerName(chunk), "users", () => openSpeakerPicker(chunk), "secondary compact speaker-badge");
     speaker.dataset.mutation = "";
     speaker.disabled = state.busy;
     top.append(speaker, element("span", "muted", `${timecode(chunk.startMs)} - ${timecode(chunk.endMs)}`));
-    if (chunk.matched) top.append(element("span", "match-count", "Search match"));
+    if (chunk.matched) top.append(element("span", `match-count ${primary ? "primary-match" : "secondary-match"}`, primary ? "Keyword match" : "Related match"));
     const body = element("p", "transcript", chunk.text || "No transcript available.");
-    if (chunk.matched && state.context.mode === "text" && state.context.q) {
+    if (primary && state.context.q) {
       body.replaceChildren();
       const source = chunk.text || "";
       const query = state.context.q.toLocaleLowerCase();
@@ -313,7 +314,9 @@
       body.append(document.createTextNode(source.slice(start)));
     }
     const actions = element("div", "inline-actions");
-    const inspect = button("Inspect voice", "audio-lines", () => inspectChunk(chunk.id));
+    const inspect = button("", "audio-lines", () => inspectChunk(chunk.id), "icon-button secondary");
+    inspect.title = "Inspect voice";
+    inspect.setAttribute("aria-label", inspect.title);
     inspect.dataset.mutation = "";
     inspect.dataset.unavailable = String(!chunk.hasVoiceEmbedding);
     inspect.disabled = !chunk.hasVoiceEmbedding || state.busy;
@@ -323,7 +326,8 @@
     remove.dataset.mutation = "";
     remove.disabled = state.busy;
     actions.append(inspect, remove);
-    node.append(top, body, actions);
+    top.append(actions);
+    node.append(top, body);
     return node;
   }
 
@@ -349,7 +353,10 @@
       state.matchIndex = Math.max(0, Math.min(state.matchIndex, conversation.matchedChunkIds.length - 1));
       renderMatches();
       if (scroll) {
-        const targetId = focusId || conversation.matchedChunkIds[0];
+        const primaryId = conversation.chunks.find(chunk => chunk.matchType === "keyword")?.id;
+        const targetId = focusId || primaryId || conversation.matchedChunkIds[0];
+        state.matchIndex = Math.max(0, conversation.matchedChunkIds.indexOf(targetId));
+        renderMatches();
         const target = targetId && $(`#segment-${targetId}`);
         if (target) {
           target.focus({ preventScroll: true });
@@ -371,7 +378,8 @@
   function renderMatches() {
     const ids = state.conversation?.matchedChunkIds || [];
     $("#match-navigation").classList.toggle("hidden", !state.context.q);
-    $("#match-summary").textContent = ids.length ? `Match ${state.matchIndex + 1} of ${ids.length} for "${state.context.q}"` : `No matching segments for "${state.context.q}"${state.context.mode === "conversation" ? " / Conversation theme result" : ""}`;
+    $("#match-summary").textContent = ids.length ? `Match ${state.matchIndex + 1} of ${ids.length} for "${state.context.q}"` : `No matching segments for "${state.context.q}"`;
+    $("#match-summary").title = $("#match-summary").textContent;
     $("#previous-match").disabled = !ids.length || state.matchIndex === 0;
     $("#next-match").disabled = !ids.length || state.matchIndex === ids.length - 1;
   }
@@ -387,7 +395,6 @@
 
   async function openSpeakerPicker(chunk) {
     if (state.busy) return;
-    const version = ++epochs.speaker;
     state.speakerChunk = chunk;
     state.speakerPeople = [];
     clearError(false);
@@ -397,22 +404,38 @@
     $("#speaker-sample").textContent = chunk.personId == null ? "Unassigned" : ownerName(chunk);
     $("#speaker-status").textContent = "Loading people...";
     $("#speaker-options").replaceChildren();
+    $("#speaker-pagination").replaceChildren();
     $("#speaker-unassign").classList.toggle("hidden", chunk.personId == null);
     $("#speaker-picker").showModal();
+    await loadSpeakerOptions();
+  }
+
+  async function loadSpeakerOptions(offset = 0) {
+    const version = ++epochs.speaker;
+    const chunk = state.speakerChunk;
+    $("#speaker-options").setAttribute("aria-busy", "true");
+    $("#speaker-options").replaceChildren();
+    $("#speaker-pagination").replaceChildren();
+    $("#speaker-status").textContent = "Loading people...";
+    $("#speaker-error").classList.add("hidden");
     try {
-      const result = await request(`/persons?chunk_id=${chunk.id}`);
+      const params = new URLSearchParams({ chunk_id: chunk.id, q: $("#speaker-filter").value.trim(), limit: pageSize, offset });
+      const result = await request(`/persons?${params}`);
       if (version !== epochs.speaker) return;
       state.speakerPeople = result.items;
       $("#speaker-status").textContent = chunk.hasVoiceEmbedding ? "Voice similarity / highest first" : "No voice comparison available";
       renderSpeakerOptions();
+      $("#speaker-options").scrollTop = 0;
+      renderPagination("#speaker-pagination", result, loadSpeakerOptions);
     } catch (error) {
       if (version === epochs.speaker) { $("#speaker-status").textContent = ""; showError(error); }
+    } finally {
+      if (version === epochs.speaker) $("#speaker-options").setAttribute("aria-busy", "false");
     }
   }
 
   function renderSpeakerOptions() {
-    const filter = $("#speaker-filter").value.trim().toLocaleLowerCase();
-    const people = state.speakerPeople.filter(person => personName(person).toLocaleLowerCase().includes(filter));
+    const people = state.speakerPeople;
     $("#speaker-options").replaceChildren(...people.map(person => {
       const row = button("", null, async () => {
         const saved = await assignChunk(state.speakerChunk.id, person.id);
@@ -748,7 +771,7 @@
   function navigate(view, extra = {}) {
     if (state.busy) return;
     history.replaceState({ ...history.state, scrollY: window.scrollY }, "");
-    const route = new URLSearchParams({ view, q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment, ...extra });
+    const route = new URLSearchParams({ view, q: state.searchQuery, assignment: state.searchAssignment, ...extra });
     history.pushState({ archiveNavigation: true }, "", `#${route}`);
     renderRoute();
   }
@@ -764,17 +787,15 @@
     clearError(false);
     $("#page-status").textContent = "";
     state.searchQuery = (route.get("q") || "").slice(0, 2000);
-    state.searchMode = ["text", "conversation"].includes(route.get("mode")) ? route.get("mode") : "semantic";
     state.searchAssignment = ["assigned", "unassigned"].includes(route.get("assignment")) ? route.get("assignment") : "all";
     $("#search-query").value = state.searchQuery;
-    $("#search-mode").value = state.searchMode;
     $("#search-assignment").value = state.searchAssignment;
     setTab(view);
     const offset = Math.max(0, Number(route.get("offset")) || 0);
     if (view === "conversation") {
       const id = Number(route.get("id"));
       if (!Number.isSafeInteger(id) || id <= 0) { showError(new Error("Invalid conversation link."), false); return; }
-      state.context = route.get("from") === "search" ? { q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment } : {};
+      state.context = route.get("from") === "search" ? { q: state.searchQuery, assignment: state.searchAssignment } : {};
       state.matchIndex = 0;
       $("#back-to-results span").textContent = route.get("from") === "search" ? "Search results" : "Conversations";
       await loadConversation(id, Number(route.get("chunk")) || null);
@@ -811,7 +832,7 @@
   $("#next-match").addEventListener("click", () => moveMatch(1));
   $("#close-speaker").addEventListener("click", () => $("#speaker-picker").close());
   $("#speaker-picker").addEventListener("close", () => { ++epochs.speaker; });
-  $("#speaker-filter").addEventListener("input", renderSpeakerOptions);
+  $("#speaker-filter").addEventListener("input", () => loadSpeakerOptions());
   $("#speaker-unassign").addEventListener("click", async () => {
     if (await assignChunk(state.speakerChunk.id, null)) $("#speaker-picker").close();
   });
@@ -826,11 +847,9 @@
     event.preventDefault();
     state.searchQuery = $("#search-query").value.trim();
     state.searchAssignment = $("#search-assignment").value;
-    state.searchMode = $("#search-mode").value;
     navigate("search");
   });
   $("#search-assignment").addEventListener("change", () => $("#search-form").requestSubmit());
-  $("#search-mode").addEventListener("change", () => $("#search-form").requestSubmit());
   $("#person-filter").addEventListener("input", renderPeople);
   $("#comparison-filter").addEventListener("input", renderComparison);
   $("#close-inspector").addEventListener("click", () => $("#inspector").close());

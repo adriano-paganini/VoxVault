@@ -2,7 +2,6 @@ package com.paganini.voxvault.service
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.paganini.voxvault.dataClass.Chunk
-import com.paganini.voxvault.dataClass.ConversationSearchMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
@@ -87,13 +86,14 @@ class HttpCommunicationServiceTest {
             server.enqueue(MockResponse.Builder().body("""{"items":[{"id":7,"timestamp":1700000000000,"chunkCount":2,"wordCount":4,"durationMs":2000,"personCount":1,"matchedChunkIds":[9],"similarity":0.9}],"total":1,"limit":25,"offset":0}""").build())
             val network = HttpCommunicationService()
             val uploadUrl = server.url("/vault/upload").toString()
-            val page = network.getConversations(uploadUrl, "budget & planning", ConversationSearchMode.CONVERSATION)
+            val page = network.getConversations(uploadUrl, "budget & planning")
             assertEquals(7L, page.items.single().id)
             assertEquals(listOf(9L), page.items.single().matchedChunkIds)
             val search = server.takeRequest(5, TimeUnit.SECONDS)!!.url
             assertEquals("/vault/api/explorer/conversations", search.encodedPath)
             assertEquals("budget & planning", search.queryParameter("q"))
-            assertEquals("conversation", search.queryParameter("mode"))
+            assertNull(search.queryParameter("mode"))
+            assertNull(search.queryParameter("min_similarity"))
             assertEquals("all", search.queryParameter("assignment"))
 
             server.enqueue(MockResponse.Builder().body("""{"id":7,"timestamp":1700000000000,"chunkCount":2,"wordCount":4,"durationMs":2000,"personCount":1,"matchedChunkIds":[9],"chunks":[{"id":8,"recordingId":7,"recordingTimestamp":1700000000000,"chunkIndex":0,"text":"Some context","wordCount":2,"startMs":0,"endMs":1000},{"id":9,"recordingId":7,"recordingTimestamp":1700000000000,"chunkIndex":1,"text":"Budget planning","wordCount":2,"startMs":1000,"endMs":2000,"personId":3,"personName":"Alex","matched":true}]}""").build())
@@ -105,6 +105,8 @@ class HttpCommunicationServiceTest {
             val request = server.takeRequest(5, TimeUnit.SECONDS)!!.url
             assertEquals("/vault/api/explorer/conversations/7", request.encodedPath)
             assertEquals("budget & planning", request.queryParameter("q"))
+            assertNull(request.queryParameter("mode"))
+            assertNull(request.queryParameter("min_similarity"))
         }
     }
 

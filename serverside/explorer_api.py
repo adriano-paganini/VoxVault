@@ -67,35 +67,30 @@ class PersonAssignment(BaseModel):
 @router.get("/conversations")
 def conversations(
     q: str = Query(default="", max_length=2000),
-    mode: Literal["text", "semantic", "conversation"] = "semantic",
     assignment: Literal["all", "assigned", "unassigned"] = "all",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    min_similarity: float = Query(default=explorer_service.DEFAULT_TEXT_SIMILARITY, ge=-1, le=1, allow_inf_nan=False),
 ):
-    return explorer_service.list_conversations(q, mode, assignment, limit, offset, min_similarity)
+    return explorer_service.list_conversations(q, assignment, limit, offset)
 
 
 @router.get("/conversations/{recording_id}")
 def conversation(
     recording_id: int,
     q: str = Query(default="", max_length=2000),
-    mode: Literal["text", "semantic", "conversation"] = "semantic",
     assignment: Literal["all", "assigned", "unassigned"] = "all",
-    min_similarity: float = Query(default=explorer_service.DEFAULT_TEXT_SIMILARITY, ge=-1, le=1, allow_inf_nan=False),
 ):
-    return explorer_service.get_conversation(recording_id, q, mode, assignment, min_similarity)
+    return explorer_service.get_conversation(recording_id, q, assignment)
 
 
 @router.get("/chunks")
 def chunks(
     q: str = Query(default="", max_length=2000),
-    mode: Literal["text", "semantic"] = "text",
     assignment: Literal["all", "assigned", "unassigned"] = "unassigned",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    return explorer_service.search_chunks(q, mode, assignment, limit, offset)
+    return explorer_service.search_chunks(q, assignment, limit, offset)
 
 
 @router.get("/chunks/{chunk_id}")
@@ -110,8 +105,13 @@ def delete_chunk(chunk_id: int):
 
 
 @router.get("/persons")
-def persons(chunk_id: int | None = Query(default=None, gt=0)):
-    return explorer_service.list_persons(chunk_id)
+def persons(
+    chunk_id: int | None = Query(default=None, gt=0),
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    return explorer_service.list_persons(chunk_id, q, limit, offset)
 
 
 @router.post("/persons", status_code=201)

@@ -5,9 +5,13 @@ from sqlalchemy import (
     BigInteger,
     Double,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     Text,
+    func,
+    literal_column,
+    or_,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -38,9 +42,6 @@ class Recording(Base):
     )
 
     language: Mapped[str | None] = mapped_column(Text)
-
-    text_embedding: Mapped[list[float] | None] = mapped_column(VECTOR(TEXT_EMBEDDING_DIM))
-    text_embedding_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
     chunks: Mapped[list[TranscriptionChunk]] = relationship(
         back_populates="recording",
@@ -141,7 +142,7 @@ class TranscriptionWord(Base):
     )
 
     chunk_id: Mapped[int] = mapped_column(
-        ForeignKey("transcription_chunk.id")
+        ForeignKey("transcription_chunk.id"), index=True,
     )
 
     word_index: Mapped[int] = mapped_column(Integer)
@@ -158,3 +159,27 @@ class TranscriptionWord(Base):
     chunk: Mapped[TranscriptionChunk] = relationship(
         back_populates="words"
     )
+
+
+Index(
+    "ix_chunk_text_hnsw", TranscriptionChunk.text_embedding,
+    postgresql_using="hnsw", postgresql_ops={"text_embedding": "vector_cosine_ops"},
+).ddl_if(dialect="postgresql")
+Index(
+    "ix_person_voice_hnsw", Person.voice_embedding,
+    postgresql_using="hnsw", postgresql_ops={"voice_embedding": "vector_cosine_ops"},
+).ddl_if(dialect="postgresql")
+Index(
+    "ix_chunk_voice_hnsw", TranscriptionChunk.voice_embedding,
+    postgresql_using="hnsw", postgresql_ops={"voice_embedding": "vector_cosine_ops"},
+).ddl_if(dialect="postgresql")
+Index(
+    "ix_chunk_recording_timeline", TranscriptionChunk.recording_id,
+    TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id,
+)
+_person_name_index_expression = func.lower(func.coalesce(Person.name, literal_column("''"))).collate("C")
+Index("ix_person_name_order", _person_name_index_expression, Person.id).ddl_if(dialect="postgresql")
+Index(
+    "ix_person_missing_voice_name", _person_name_index_expression, Person.id,
+    postgresql_where=or_(Person.voice_embedding.is_(None), Person.voice_embedding.max_inner_product(Person.voice_embedding) == 0),
+).ddl_if(dialect="postgresql")

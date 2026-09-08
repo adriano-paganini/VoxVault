@@ -4,16 +4,18 @@ import math
 import logging
 from functools import lru_cache
 
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import and_, case, func, literal, literal_column, or_, select, text
 from sqlalchemy.orm import joinedload, selectinload
 
 from db.database import SessionLocal
 from db.models import Person, Recording, TranscriptionChunk, TEXT_EMBEDDING_DIM, VOICE_EMBEDDING_DIM
-from conversation_embeddings import update_conversation_embedding
 
 
 logger = logging.getLogger(__name__)
-DEFAULT_TEXT_SIMILARITY = 0.75
+MIN_TEXT_SIMILARITY = 0.80
+MIN_SEARCH_WORDS = 3
+KEYWORD_BONUS = 0.5
+SEARCH_CANDIDATES = 200
 
 
 class ExplorerError(ValueError):
@@ -70,6 +72,36 @@ def _similarity(column, reference):
     return case((valid, 1.0 - distance), else_=None)
 
 
+def _nearest_query(model, column, reference, conditions=()):
+    distance = column.cosine_distance(list(reference))
+    # HNSW requires the raw distance operator in ascending ORDER BY, before
+    # grouping, score conversion, thresholds, or metadata joins.
+    return select(model.id, distance.label("distance")).where(
+        column.is_not(None), *conditions,
+    ).order_by(distance).limit(SEARCH_CANDIDATES)
+
+
+def _nearest_ids(session, model, column, reference, conditions=(), min_similarity=-1):
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text("SELECT set_config('hnsw.ef_search', :value, true)"),
+                        {"value": str(SEARCH_CANDIDATES)})
+    return [id for id, distance in session.execute(_nearest_query(model, column, reference, conditions))
+            if distance is not None and math.isfinite(distance)
+            and -1e-6 <= distance <= 2.000001 and 1 - distance >= min_similarity - 1e-6]
+
+
+def _search_metadata(approximate=False):
+    return {"approximate": approximate, "candidateLimit": SEARCH_CANDIDATES if approximate else None}
+
+
+def _assignment_conditions(assignment):
+    if assignment == "assigned":
+        return [TranscriptionChunk.person_id.is_not(None)]
+    if assignment == "unassigned":
+        return [TranscriptionChunk.person_id.is_(None)]
+    return []
+
+
 def _score(value):
     if value is None or not math.isfinite(value):
         return None
@@ -82,7 +114,7 @@ def _confidence(value):
     return max(0.0, min(1.0, float(value)))
 
 
-def _chunk_dict(chunk, similarity=None):
+def _chunk_dict(chunk, similarity=None, match_score=None, keyword_match=None):
     return {
         "id": chunk.id,
         "recordingId": chunk.recording_id,
@@ -108,10 +140,13 @@ def _chunk_dict(chunk, similarity=None):
             for word in sorted(chunk.words, key=lambda item: item.word_index)
         ],
         "similarity": _score(similarity),
+        "matchScore": match_score,
+        "matched": keyword_match is not None,
+        "matchType": None if keyword_match is None else "keyword" if keyword_match else "semantic",
     }
 
 
-def _person_stats():
+def _person_stats(person_ids):
     return (
         select(
             TranscriptionChunk.person_id.label("person_id"),
@@ -119,13 +154,14 @@ def _person_stats():
             func.count(func.distinct(TranscriptionChunk.recording_id)).label("recording_count"),
             func.sum(TranscriptionChunk.word_count).label("word_count"),
         )
+        .where(TranscriptionChunk.person_id.in_(person_ids))
         .group_by(TranscriptionChunk.person_id)
         .subquery()
     )
 
 
-def _person_select(similarity=None):
-    stats = _person_stats()
+def _person_select(person_ids, similarity=None):
+    stats = _person_stats(person_ids)
     return (
         select(
             Person,
@@ -135,6 +171,7 @@ def _person_select(similarity=None):
             similarity if similarity is not None else literal(None),
         )
         .outerjoin(stats, stats.c.person_id == Person.id)
+        .where(Person.id.in_(person_ids))
     )
 
 
@@ -169,19 +206,22 @@ def _get_chunk(session, chunk_id, lock=False):
 
 
 def _person_response(session, person_id):
-    row = session.execute(_person_select().where(Person.id == person_id)).one_or_none()
+    row = session.execute(_person_select([person_id])).one_or_none()
     if row is None:
         raise ExplorerError(404, "Person not found.")
     return _person_dict(row)
 
 
-def _chunk_page(session, conditions, similarity, limit, offset, order_by=None):
+def _chunk_page(session, conditions, similarity, limit, offset, order_by=None,
+                match_score=None, keyword_match=None):
     total = session.scalar(
         select(func.count()).select_from(TranscriptionChunk).join(Recording).where(*conditions)
     )
     score = similarity if similarity is not None else literal(None)
     query = (
-        select(TranscriptionChunk, score)
+        select(TranscriptionChunk, score,
+               match_score if match_score is not None else literal(None),
+               keyword_match if keyword_match is not None else literal(None))
         .join(Recording)
         .where(*conditions)
         .options(
@@ -194,7 +234,7 @@ def _chunk_page(session, conditions, similarity, limit, offset, order_by=None):
         .offset(offset)
     )
     return {
-        "items": [_chunk_dict(chunk, value) for chunk, value in session.execute(query).all()],
+        "items": [_chunk_dict(chunk, value, rank, keyword) for chunk, value, rank, keyword in session.execute(query).all()],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -212,90 +252,92 @@ def query_embedding(q):
         return tuple(vector)
     except Exception as exc:
         logger.exception("Could not create a conversation search embedding")
-        raise ExplorerError(503, "Semantic search is temporarily unavailable. Try text search or retry shortly.") from exc
+        raise ExplorerError(503, "Semantic search is temporarily unavailable. Please retry shortly.") from exc
 
 
-def _matching_chunks(q, mode, assignment, min_similarity, reference):
-    conditions = []
-    similarity = None
-    if assignment == "assigned":
-        conditions.append(TranscriptionChunk.person_id.is_not(None))
-    elif assignment == "unassigned":
-        conditions.append(TranscriptionChunk.person_id.is_(None))
-    if q:
-        if mode == "text":
-            conditions.append(TranscriptionChunk.text.icontains(q, autoescape=True))
-        else:
-            similarity = _similarity(TranscriptionChunk.text_embedding, reference)
-            conditions.append(similarity >= min_similarity)
-    return conditions, similarity
+def _matching_chunks(q, assignment, reference):
+    conditions = _assignment_conditions(assignment)
+    if not q:
+        return conditions, None, None, None
+    similarity = _similarity(TranscriptionChunk.text_embedding, reference)
+    keyword = TranscriptionChunk.text.icontains(q, autoescape=True)
+    # Literal matches stay discoverable even when their vector is a weak match.
+    conditions.extend([TranscriptionChunk.word_count >= MIN_SEARCH_WORDS,
+                       or_(keyword, similarity >= MIN_TEXT_SIMILARITY)])
+    match_score = func.coalesce(similarity, 0.0) + case((keyword, KEYWORD_BONUS), else_=0.0)
+    return conditions, similarity, match_score, keyword
 
 
-def search_chunks(q="", mode="text", assignment="unassigned", limit=25, offset=0):
+def search_chunks(q="", assignment="unassigned", limit=25, offset=0):
     q = q.strip()
-    reference = query_embedding(q) if q and mode == "semantic" else None
-    conditions, similarity = _matching_chunks(q, mode, assignment, DEFAULT_TEXT_SIMILARITY, reference)
+    reference = query_embedding(q) if q else None
+    conditions, similarity, match_score, keyword = _matching_chunks(q, assignment, reference)
     with SessionLocal() as session:
-        order = [similarity.desc(), TranscriptionChunk.id] if similarity is not None else None
-        return _chunk_page(session, conditions, similarity, limit, offset, order)
+        order = [match_score.desc(), TranscriptionChunk.id] if q else None
+        return {**_chunk_page(session, conditions, similarity, limit, offset, order, match_score, keyword),
+                **_search_metadata()}
 
 
-def _conversation_select(similarity=None):
+def _conversation_select(recording_ids):
     stats = select(
         TranscriptionChunk.recording_id.label("recording_id"),
         func.count().label("chunk_count"),
         func.sum(TranscriptionChunk.word_count).label("word_count"),
         func.max(TranscriptionChunk.end_ms).label("duration_ms"),
         func.count(func.distinct(TranscriptionChunk.person_id)).label("person_count"),
-    ).group_by(TranscriptionChunk.recording_id).subquery()
+    ).where(TranscriptionChunk.recording_id.in_(recording_ids)).group_by(TranscriptionChunk.recording_id).subquery()
     preview = select(func.substr(TranscriptionChunk.text, 1, 240)).where(
         TranscriptionChunk.recording_id == Recording.id,
     ).order_by(TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id).limit(1).scalar_subquery()
     return select(
         Recording, func.coalesce(stats.c.chunk_count, 0), func.coalesce(stats.c.word_count, 0),
         func.coalesce(stats.c.duration_ms, 0), func.coalesce(stats.c.person_count, 0), preview,
-        similarity if similarity is not None else literal(None),
-    ).outerjoin(stats, stats.c.recording_id == Recording.id)
+    ).outerjoin(stats, stats.c.recording_id == Recording.id).where(Recording.id.in_(recording_ids))
 
 
 def _conversation_dict(row):
-    recording, chunks, words, duration, people, preview, similarity = row
+    recording, chunks, words, duration, people, preview = row
     return {
         "id": recording.id, "timestamp": recording.timestamp, "language": recording.language,
         "chunkCount": chunks, "wordCount": words, "durationMs": duration, "personCount": people,
-        "preview": preview or "", "hasTextEmbedding": _valid_vector(recording.text_embedding, TEXT_EMBEDDING_DIM) is not None,
-        "similarity": _score(similarity), "matchedChunkIds": [],
+        "preview": preview or "", "similarity": None,
+        "matchScore": None, "matchedChunkIds": [],
     }
 
 
-def list_conversations(q="", mode="semantic", assignment="all", limit=25, offset=0, min_similarity=DEFAULT_TEXT_SIMILARITY):
+def list_conversations(q="", assignment="all", limit=25, offset=0):
     q = q.strip()
-    reference = query_embedding(q) if q and mode != "text" else None
-    conditions, chunk_similarity = _matching_chunks(q, mode, assignment, min_similarity, reference)
-    matches = select(
-        TranscriptionChunk.recording_id.label("recording_id"),
-        func.max(chunk_similarity).label("similarity") if chunk_similarity is not None else literal(None).label("similarity"),
-    ).where(*conditions).group_by(TranscriptionChunk.recording_id).subquery()
-    theme_search = bool(q and mode == "conversation")
-    similarity = _similarity(Recording.text_embedding, reference) if theme_search else matches.c.similarity
-    query = _conversation_select(similarity)
-    if theme_search:
-        query = query.where(similarity >= min_similarity)
-        if assignment != "all":
-            assignment_conditions, _ = _matching_chunks("", mode, assignment, min_similarity, None)
-            query = query.where(select(TranscriptionChunk.id).where(
-                TranscriptionChunk.recording_id == Recording.id, *assignment_conditions,
-            ).exists())
-    elif q or assignment != "all":
-        query = query.join(matches, matches.c.recording_id == Recording.id)
-    else:
-        query = query.outerjoin(matches, matches.c.recording_id == Recording.id)
-    order = [similarity.desc().nullslast()] if q and mode != "text" else []
+    reference = query_embedding(q) if q else None
+    conditions, chunk_similarity, chunk_score, _ = _matching_chunks(q, assignment, reference)
     with SessionLocal() as session:
+        order = []
+        recording_conditions = []
+        if assignment != "all":
+            recording_conditions.append(select(TranscriptionChunk.id).where(
+                TranscriptionChunk.recording_id == Recording.id, *_assignment_conditions(assignment),
+            ).exists())
+        if q:
+            # Aggregate all qualifying chunks before pagination, without a candidate cap.
+            matches = select(
+                TranscriptionChunk.recording_id.label("recording_id"),
+                func.max(chunk_similarity).label("similarity"),
+                func.sum(chunk_score).label("match_score"),
+            ).where(*conditions).group_by(TranscriptionChunk.recording_id).subquery()
+            query = select(Recording.id, matches.c.similarity, matches.c.match_score).join(
+                matches, matches.c.recording_id == Recording.id,
+            )
+            order = [matches.c.match_score.desc()]
+        else:
+            query = select(Recording.id, literal(None), literal(None)).where(*recording_conditions)
         total = session.scalar(select(func.count()).select_from(query.subquery()))
-        items = [_conversation_dict(row) for row in session.execute(
+        page = session.execute(
             query.order_by(*order, Recording.timestamp.desc(), Recording.id.desc()).limit(limit).offset(offset)
-        )]
+        ).all()
+        by_id = {row[0].id: _conversation_dict(row) for row in session.execute(
+            _conversation_select([id for id, _, _ in page]),
+        )} if page else {}
+        items = [{**by_id[id], "similarity": _score(similarity), "matchScore": match_score}
+                 for id, similarity, match_score in page]
         if q and items:
             by_id = {item["id"]: item for item in items}
             for chunk_id, recording_id in session.execute(select(
@@ -304,27 +346,26 @@ def list_conversations(q="", mode="semantic", assignment="all", limit=25, offset
                 TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id,
             )):
                 by_id[recording_id]["matchedChunkIds"].append(chunk_id)
-        return {"items": items, "total": total, "limit": limit, "offset": offset}
+        return {"items": items, "total": total, "limit": limit, "offset": offset,
+                **_search_metadata()}
 
 
-def get_conversation(recording_id, q="", mode="semantic", assignment="all", min_similarity=DEFAULT_TEXT_SIMILARITY):
+def get_conversation(recording_id, q="", assignment="all"):
     q = q.strip()
     with SessionLocal() as session:
-        row = session.execute(_conversation_select().where(Recording.id == recording_id)).one_or_none()
+        row = session.execute(_conversation_select([recording_id])).one_or_none()
         if row is None:
             raise ExplorerError(404, "Conversation not found.")
         result = _conversation_dict(row)
-        reference = query_embedding(q) if q and mode != "text" else None
+        reference = query_embedding(q) if q else None
         matches = {}
         if q:
-            conditions, similarity = _matching_chunks(q, mode, assignment, min_similarity, reference)
-            matches = dict(session.execute(select(
-                TranscriptionChunk.id, similarity if similarity is not None else literal(None),
-            ).where(TranscriptionChunk.recording_id == recording_id, *conditions)).all())
-            if mode == "conversation":
-                result["similarity"] = _score(session.scalar(select(
-                    _similarity(Recording.text_embedding, reference),
-                ).where(Recording.id == recording_id)))
+            conditions, similarity, match_score, keyword = _matching_chunks(q, assignment, reference)
+            matches = {id: (value, rank, exact) for id, value, rank, exact in session.execute(select(
+                TranscriptionChunk.id, similarity, match_score, keyword,
+            ).where(TranscriptionChunk.recording_id == recording_id, *conditions))}
+            result["similarity"] = _score(max((value for value, _, _ in matches.values() if value is not None), default=None))
+            result["matchScore"] = math.fsum(rank for _, rank, _ in matches.values())
         chunks = session.scalars(select(TranscriptionChunk).where(
             TranscriptionChunk.recording_id == recording_id,
         ).options(
@@ -332,7 +373,7 @@ def get_conversation(recording_id, q="", mode="semantic", assignment="all", min_
             selectinload(TranscriptionChunk.words),
         ).order_by(TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id)).all()
         result["chunks"] = [
-            {**_chunk_dict(chunk, matches.get(chunk.id)), "matched": chunk.id in matches}
+            _chunk_dict(chunk, *matches.get(chunk.id, (None, None, None)))
             for chunk in chunks
         ]
         result["matchedChunkIds"] = [chunk.id for chunk in chunks if chunk.id in matches]
@@ -344,19 +385,33 @@ def get_chunk(chunk_id):
         return _chunk_dict(_get_chunk(session, chunk_id))
 
 
-def list_persons(chunk_id=None):
+def _person_name_order():
+    return func.lower(func.coalesce(Person.name, literal_column("''"))).collate("C")
+
+
+def list_persons(chunk_id=None, q="", limit=25, offset=0):
     with SessionLocal() as session:
         similarity = None
+        reference = None
+        name_order = _person_name_order()
+        conditions = [name_order.startswith(q.strip().lower(), autoescape=True)] if q.strip() else []
         if chunk_id is not None:
             chunk = _get_chunk(session, chunk_id)
             reference = _valid_vector(chunk.voice_embedding)
             if reference is not None:
                 similarity = _similarity(Person.voice_embedding, reference)
-        query = _person_select(similarity)
+        order = [similarity.desc().nullslast()] if similarity is not None else []
+        candidates = select(Person.id).where(*conditions).order_by(*order, name_order, Person.id)
+        page_ids = session.scalars(candidates.limit(limit + 1).offset(offset)).all()
+        total = session.scalar(select(func.count()).select_from(Person).where(*conditions))
+        has_more = len(page_ids) > limit
+        query = _person_select(page_ids[:limit], similarity)
         if similarity is not None:
             query = query.order_by(similarity.desc().nullslast())
-        query = query.order_by(func.lower(func.coalesce(Person.name, "")), Person.id)
-        return {"items": [_person_dict(row) for row in session.execute(query).all()]}
+        query = query.order_by(name_order, Person.id)
+        return {"items": [_person_dict(row) for row in session.execute(query).all()],
+                "total": total, "limit": limit, "offset": offset, "hasMore": has_more,
+                **_search_metadata()}
 
 
 def get_person(person_id):
@@ -397,11 +452,12 @@ def similar_chunks(chunk_id=None, person_id=None, scope="other", limit=25, offse
                 TranscriptionChunk.person_id != selected_person_id,
             ))
         similarity = _similarity(TranscriptionChunk.voice_embedding, reference)
-        conditions.append(similarity.is_not(None))
-        return _chunk_page(
+        ids = _nearest_ids(session, TranscriptionChunk, TranscriptionChunk.voice_embedding, reference, conditions)
+        conditions.append(TranscriptionChunk.id.in_(ids))
+        return {**_chunk_page(
             session, conditions, similarity, limit, offset,
             [similarity.desc().nullslast(), TranscriptionChunk.id],
-        )
+        ), **_search_metadata(True)}
 
 
 def _name(name):
@@ -486,15 +542,8 @@ def delete_chunk(chunk_id):
     with SessionLocal.begin() as session:
         chunk = _get_chunk(session, chunk_id, lock=True)
         people = _lock_persons(session, [chunk.person_id])
-        recording = session.scalar(select(Recording).where(
-            Recording.id == chunk.recording_id,
-        ).with_for_update())
         # Keep the recording timestamp so re-uploading cannot recreate deleted speech.
         session.delete(chunk)
         session.flush()
         for person in people.values():
             _recompute_person(session, person)
-        remaining = session.scalars(select(TranscriptionChunk).where(
-            TranscriptionChunk.recording_id == recording.id,
-        )).all()
-        update_conversation_embedding(recording, remaining)

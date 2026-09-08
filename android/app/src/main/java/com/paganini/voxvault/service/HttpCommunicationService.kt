@@ -3,7 +3,6 @@ package com.paganini.voxvault.service
 import com.paganini.voxvault.dataClass.Chunk
 import com.paganini.voxvault.dataClass.AssignPersonRequest
 import com.paganini.voxvault.dataClass.ConversationDetail
-import com.paganini.voxvault.dataClass.ConversationSearchMode
 import com.paganini.voxvault.dataClass.ConversationSummary
 import com.paganini.voxvault.dataClass.CreatePersonRequest
 import com.paganini.voxvault.dataClass.ExplorerPage
@@ -87,29 +86,30 @@ internal class HttpCommunicationService(private val client: OkHttpClient = share
     }
 
     suspend fun getConversations(
-        uploadUrl: String, query: String = "", mode: ConversationSearchMode = ConversationSearchMode.SEMANTIC,
-        assignment: String = "all", limit: Int = 25, offset: Int = 0, minSimilarity: Double = 0.75,
+        uploadUrl: String, query: String = "", assignment: String = "all", limit: Int = 25, offset: Int = 0,
     ): ExplorerPage<ConversationSummary> {
         val url = explorerUrl(uploadUrl, "conversations")
-            .addQueryParameter("q", query).addQueryParameter("mode", mode.queryValue)
+            .addQueryParameter("q", query)
             .addQueryParameter("assignment", assignment).addQueryParameter("limit", limit.toString())
-            .addQueryParameter("offset", offset.toString()).addQueryParameter("min_similarity", minSimilarity.toString()).build()
+            .addQueryParameter("offset", offset.toString()).build()
         return json.decodeFromString(request(Request.Builder().url(url).build(), 4 * 1024 * 1024))
     }
 
     suspend fun getConversation(
         uploadUrl: String, recordingId: Long, query: String = "",
-        mode: ConversationSearchMode = ConversationSearchMode.SEMANTIC,
-        assignment: String = "all", minSimilarity: Double = 0.75,
+        assignment: String = "all",
     ): ConversationDetail {
         val url = explorerUrl(uploadUrl, "conversations/$recordingId")
-            .addQueryParameter("q", query).addQueryParameter("mode", mode.queryValue)
-            .addQueryParameter("assignment", assignment).addQueryParameter("min_similarity", minSimilarity.toString()).build()
+            .addQueryParameter("q", query).addQueryParameter("assignment", assignment).build()
         return json.decodeFromString(request(Request.Builder().url(url).build(), 32 * 1024 * 1024))
     }
 
-    suspend fun getSpeakerSuggestions(uploadUrl: String, chunkId: Long): PersonList {
-        val url = explorerUrl(uploadUrl, "persons").addQueryParameter("chunk_id", chunkId.toString()).build()
+    suspend fun getSpeakerSuggestions(
+        uploadUrl: String, chunkId: Long, query: String = "", limit: Int = 25, offset: Int = 0,
+    ): PersonList {
+        val url = explorerUrl(uploadUrl, "persons").addQueryParameter("chunk_id", chunkId.toString())
+            .addQueryParameter("q", query).addQueryParameter("limit", limit.toString())
+            .addQueryParameter("offset", offset.toString()).build()
         return json.decodeFromString(request(Request.Builder().url(url).build(), 4 * 1024 * 1024))
     }
 

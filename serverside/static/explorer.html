@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Conversations | VoxVault</title>
     <link rel="stylesheet" href="/static/style.css?v=7" />
-    <link rel="stylesheet" href="/static/explorer.css?v=4" />
+    <link rel="stylesheet" href="/static/explorer.css?v=6" />
   </head>
   <body class="explorer">
     <main class="shell explorer-shell">
@@ -28,7 +28,6 @@
       <section id="search-view" class="hidden" aria-label="Search conversations">
         <form id="search-form" class="search-form">
           <div class="query-field"><label for="search-query">Conversation search</label><input id="search-query" name="q" type="search" placeholder="Search your conversations" autocomplete="off" maxlength="2000" /></div>
-          <div><label for="search-mode">Search by</label><select id="search-mode"><option value="semantic">Segment meaning</option><option value="conversation">Conversation theme</option><option value="text">Exact text</option></select></div>
           <div><label for="search-assignment">Speaker</label><select id="search-assignment"><option value="all">All speakers</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></div>
           <button id="search-submit" type="submit"><img src="/static/icons/search.svg" alt="" />Search</button>
         </form>
@@ -56,8 +55,9 @@
       <div class="speaker-body">
         <p id="speaker-error" class="notice error hidden" role="alert"></p><p id="speaker-status" class="operation-status" role="status"></p>
         <p id="speaker-sample" class="muted"></p>
-        <label for="speaker-filter">Person</label><input id="speaker-filter" type="search" placeholder="Filter people" autocomplete="off" />
+        <label for="speaker-filter">Person</label><input id="speaker-filter" type="search" placeholder="Filter people" autocomplete="off" maxlength="200" />
         <div id="speaker-options" aria-busy="false"></div>
+        <div id="speaker-pagination" class="pagination"></div>
         <button id="speaker-unassign" type="button" class="secondary compact"><img src="/static/icons/unlink.svg" alt="" />Unassign</button>
         <form id="speaker-create-form" class="speaker-create"><label for="speaker-new-name">New person</label><input id="speaker-new-name" required maxlength="200" autocomplete="off" placeholder="Name" /><button type="submit"><img src="/static/icons/user-plus.svg" alt="" />Create &amp; assign</button></form>
       </div>
@@ -101,6 +101,6 @@
         <button class="danger" value="delete"><img src="/static/icons/trash-2.svg" alt="" />Delete chunk</button>
       </form>
     </dialog>
-    <script src="/static/explorer.js?v=4" defer></script>
+    <script src="/static/explorer.js?v=6" defer></script>
   </body>
 </html>

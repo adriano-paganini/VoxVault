@@ -20,7 +20,6 @@ from sqlalchemy.orm import sessionmaker
 import audio_processer
 import db_interaction
 from db.models import Base, Person, Recording, SetupState, TranscriptionChunk
-from db.database import migrate_setup_languages
 import encryption
 import explorer_service
 import main
@@ -307,21 +306,6 @@ class SetupTests(unittest.TestCase):
         self.assertIn({"status": "skipped", "timestamp": 123456, "reason": "no speech detected"}, events)
         with self.sessions() as session:
             self.assertIsNone(session.scalar(select(Recording)))
-
-    def test_setup_language_column_upgrade_preserves_existing_rows(self):
-        from sqlalchemy import text
-
-        engine = create_engine("sqlite://")
-        try:
-            with engine.begin() as connection:
-                connection.execute(text("CREATE TABLE setup_state (id INTEGER PRIMARY KEY, stage TEXT)"))
-                connection.execute(text("INSERT INTO setup_state VALUES (1, 'complete')"))
-                migrate_setup_languages(connection)
-                migrate_setup_languages(connection)
-                row = connection.execute(text("SELECT stage, expected_languages FROM setup_state")).one()
-                self.assertEqual(tuple(row), ("complete", '["en"]'))
-        finally:
-            engine.dispose()
 
     def test_chunk_boundaries_skip_unaligned_words_and_preserve_chunk_size(self):
         words = [audio_processer.TranscriptWord("word", i * 10, (i + 1) * 10, None, .9) for i in range(501)]

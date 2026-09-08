@@ -61,16 +61,17 @@ The **Conversations** tab lists distinct processed recordings, newest first.
 Opening a recording displays every surviving chunk in chronological order,
 with full, readable transcripts on desktop, mobile browsers, and Android.
 
-- Search by **Segment meaning**, **Conversation theme**, or **Exact text**
-  (case-insensitive substring matching). Results are grouped by conversation.
+- Search semantically across individual transcript chunks. Results are grouped
+  by conversation and ranked by matching chunk count times maximum similarity.
   An empty query browses all recordings. Assignment filters affect matches;
   conversation details always retain the surrounding dialogue.
 - Search results open the full conversation with matching segments highlighted.
   Previous/next match controls, reloadable links, and Back navigation preserve
-  the search context. Theme results can have no individually matching segments.
+  the search context.
 - Select a segment's speaker to assign, reassign, unassign, or create a person.
   Existing people appear in descending voice cosine similarity, with missing
-  profiles last. Manual assignment also works without a usable voice vector.
+  profiles last. The picker supports name filtering and pagination through all
+  people. Manual assignment also works without a usable voice vector.
 - The voice inspector retains word confidence, language, timings, and raw
   diarization labels for closer inspection.
 - **Inspect Voice Embedding** opens the selected chunk alongside existing
@@ -89,33 +90,37 @@ weighted-profile calculation.
 
 The explorer API is documented under `/docs` at `/api/explorer`. Semantic
 search uses the existing multilingual E5 model and may take longer on its
-first request while loading the model. Text matching does not need inference.
+first request while loading the model.
 
-Startup applies `db/migrations/001_conversation_embeddings.sql` and backfills
-existing recordings, without retranscribing audio or running an ML model.
-`recording.text_embedding` is the unit-normalized, word-count-weighted mean of
-valid unit-normalized chunk text vectors (384 dimensions). Empty or cancelling
-means remain null; `text_embedding_version` records completed backfills. New
-uploads and chunk deletions update this vector in the same save transaction.
-Existing `transcription_chunk.person_id` foreign keys and person voice profiles
-are retained. The migration adds lookup indexes for recording and person IDs.
+Startup enables pgvector and creates the current tables and indexes directly
+from `db/models.py` in one transaction. Repeated startup leaves existing tables
+and data intact. Text embeddings belong to chunks; no conversation vectors are
+computed during upload, deletion, or startup.
 
 Conversation endpoints (camelCase JSON, recording IDs rather than upload chunk indexes):
 
 | Endpoint | Response |
 | --- | --- |
-| `GET /api/explorer/conversations` | Paginated summaries with `matchedChunkIds` and cosine `similarity` |
+| `GET /api/explorer/conversations` | Paginated summaries with `matchedChunkIds`, maximum cosine `similarity`, and `matchScore` |
 | `GET /api/explorer/conversations/{id}` | Recording metadata, all ordered `chunks`, and per-chunk `matched` flags |
 | `GET /api/explorer/persons?chunk_id={id}` | Existing people ranked by voice cosine similarity |
 | `PUT /api/explorer/chunks/{id}/person` | Assignment using `{"personId": 3}` or explicit `null` to unassign |
 | `POST /api/explorer/persons` | Create and assign using `{"name": "Alex", "chunkId": 9}` |
 
-Both conversation GET endpoints accept `q`, `mode=text|semantic|conversation`,
-`assignment=all|assigned|unassigned`, and `min_similarity` (default `0.75`, range
-`-1..1`). The list also accepts `limit` (1..100) and `offset`. Semantic scores
-below the threshold are excluded. Theme ranking uses the stored conversation
-vector; segment ranking uses the best matching chunk. Empty queries require no
-model. A failed model load returns `503`; text search remains available.
+Both conversation GET endpoints accept `q` and `assignment=all|assigned|unassigned`.
+The list also accepts `limit` (1..100) and `offset`. The fixed cosine similarity
+threshold is `0.80`. Every qualifying chunk contributes to `matchScore`, without
+an approximate nearest-neighbor candidate cap; pagination happens after grouping
+and ranking. `matchScore` can exceed 1, while `similarity` stays within -1..1.
+Ties use newest recording timestamp, then recording ID. Empty queries require no
+model and browse newest first. A failed model load returns `503`.
+Semantic matching includes related wording and does not require literal query
+occurrences. The legacy `/chunks` endpoint retains its separate search modes.
+
+Run the optional real-model relevance regression with
+`EXPLORER_RUN_MODEL_TESTS=1 .venv/bin/python -m unittest discover -s tests -p test_explorer.py`.
+It uses the configured E5 model to compare banana discussion with unrelated topics.
+Set `EXPLORER_TEST_DATABASE_URL` to exercise fresh PostgreSQL initialization and pgvector too.
 
 Android's `HttpCommunicationService` exposes typed conversation retrieval,
 speaker suggestions, assignment, and person creation using the same upload URL

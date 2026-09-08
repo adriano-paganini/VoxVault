@@ -1,16 +1,15 @@
 package com.paganini.voxvault.dataClass
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 
-// These are processed archive records; Recording and Chunk remain local upload models.
 @Serializable
-internal enum class ConversationSearchMode(val queryValue: String) {
-    @SerialName("text") TEXT("text"),
-    @SerialName("semantic") SEMANTIC("semantic"),
-    @SerialName("conversation") CONVERSATION("conversation"),
+internal enum class ChunkMatchType {
+    @SerialName("keyword") KEYWORD,
+    @SerialName("semantic") SEMANTIC,
 }
 
+// These are processed archive records; Recording and Chunk remain local upload models.
 @Serializable
 internal data class ExplorerPage<T>(
     val items: List<T>, val total: Int, val limit: Int, val offset: Int,
@@ -26,8 +25,8 @@ internal data class ConversationSummary(
     val durationMs: Long,
     val personCount: Int,
     val preview: String = "",
-    val hasTextEmbedding: Boolean = false,
     val similarity: Double? = null,
+    val matchScore: Double? = null,
     val matchedChunkIds: List<Long> = emptyList(),
 )
 
@@ -42,6 +41,7 @@ internal data class ConversationDetail(
     val personCount: Int,
     val chunks: List<TranscriptChunk>,
     val similarity: Double? = null,
+    val matchScore: Double? = null,
     val matchedChunkIds: List<Long> = emptyList(),
 )
 
@@ -62,6 +62,8 @@ internal data class TranscriptChunk(
     val words: List<TranscriptWord> = emptyList(),
     val similarity: Double? = null,
     val matched: Boolean = false,
+    val matchType: ChunkMatchType? = null,
+    val matchScore: Double? = null,
 )
 
 @Serializable
@@ -78,7 +80,10 @@ internal data class PersonProfile(
 )
 
 @Serializable
-internal data class PersonList(val items: List<PersonProfile>)
+internal data class PersonList(
+    val items: List<PersonProfile>, val total: Int = 0, val limit: Int = 25,
+    val offset: Int = 0, val hasMore: Boolean = false,
+)
 
 @Serializable
 internal data class SpeakerAssignment(val chunk: TranscriptChunk, val person: PersonProfile? = null)
