@@ -57,15 +57,22 @@ preserves the private key because its directory is a host bind mount.
 ## Conversation Explorer
 
 After setup, select **Explore conversations**, or open `/ui/explorer`.
-The explorer uses the existing recordings, transcription words, chunks, and
-people; no database migration or reprocessing is needed.
+The **Conversations** tab lists distinct processed recordings, newest first.
+Opening a recording displays every surviving chunk in chronological order,
+with full, readable transcripts on desktop, mobile browsers, and Android.
 
-- Search all chunks with a free-text semantic query, or select text matching
-  for literal case-insensitive search. An empty query browses the archive.
-  Results are paginated and can be filtered by assignment status.
-- Word colors show saved transcription confidence, including a separate
-  unknown-confidence state. Chunk details include recording time, language,
-  offsets, and speaker labels.
+- Search by **Segment meaning**, **Conversation theme**, or **Exact text**
+  (case-insensitive substring matching). Results are grouped by conversation.
+  An empty query browses all recordings. Assignment filters affect matches;
+  conversation details always retain the surrounding dialogue.
+- Search results open the full conversation with matching segments highlighted.
+  Previous/next match controls, reloadable links, and Back navigation preserve
+  the search context. Theme results can have no individually matching segments.
+- Select a segment's speaker to assign, reassign, unassign, or create a person.
+  Existing people appear in descending voice cosine similarity, with missing
+  profiles last. Manual assignment also works without a usable voice vector.
+- The voice inspector retains word confidence, language, timings, and raw
+  diarization labels for closer inspection.
 - **Inspect Voice Embedding** opens the selected chunk alongside existing
   people and ranked voice matches. Select a person, rename them, inspect
   their known chunks, or create a named person from the selected sample.
@@ -83,6 +90,39 @@ weighted-profile calculation.
 The explorer API is documented under `/docs` at `/api/explorer`. Semantic
 search uses the existing multilingual E5 model and may take longer on its
 first request while loading the model. Text matching does not need inference.
+
+Startup applies `db/migrations/001_conversation_embeddings.sql` and backfills
+existing recordings, without retranscribing audio or running an ML model.
+`recording.text_embedding` is the unit-normalized, word-count-weighted mean of
+valid unit-normalized chunk text vectors (384 dimensions). Empty or cancelling
+means remain null; `text_embedding_version` records completed backfills. New
+uploads and chunk deletions update this vector in the same save transaction.
+Existing `transcription_chunk.person_id` foreign keys and person voice profiles
+are retained. The migration adds lookup indexes for recording and person IDs.
+
+Conversation endpoints (camelCase JSON, recording IDs rather than upload chunk indexes):
+
+| Endpoint | Response |
+| --- | --- |
+| `GET /api/explorer/conversations` | Paginated summaries with `matchedChunkIds` and cosine `similarity` |
+| `GET /api/explorer/conversations/{id}` | Recording metadata, all ordered `chunks`, and per-chunk `matched` flags |
+| `GET /api/explorer/persons?chunk_id={id}` | Existing people ranked by voice cosine similarity |
+| `PUT /api/explorer/chunks/{id}/person` | Assignment using `{"personId": 3}` or explicit `null` to unassign |
+| `POST /api/explorer/persons` | Create and assign using `{"name": "Alex", "chunkId": 9}` |
+
+Both conversation GET endpoints accept `q`, `mode=text|semantic|conversation`,
+`assignment=all|assigned|unassigned`, and `min_similarity` (default `0.75`, range
+`-1..1`). The list also accepts `limit` (1..100) and `offset`. Semantic scores
+below the threshold are excluded. Theme ranking uses the stored conversation
+vector; segment ranking uses the best matching chunk. Empty queries require no
+model. A failed model load returns `503`; text search remains available.
+
+Android's `HttpCommunicationService` exposes typed conversation retrieval,
+speaker suggestions, assignment, and person creation using the same upload URL
+prefix and cancellable OkHttp connection pool. Archive DTOs in `Conversation.kt`
+are separate from the encrypted local `Recording` and transport `Chunk` classes.
+The shared WebView consumes the same API, and Android Back closes a picker or
+returns from a conversation to its previous results.
 
 ## Stop and Reset
 

@@ -1,11 +1,20 @@
 package com.paganini.voxvault.service
 
 import com.paganini.voxvault.dataClass.Chunk
+import com.paganini.voxvault.dataClass.AssignPersonRequest
+import com.paganini.voxvault.dataClass.ConversationDetail
+import com.paganini.voxvault.dataClass.ConversationSearchMode
+import com.paganini.voxvault.dataClass.ConversationSummary
+import com.paganini.voxvault.dataClass.CreatePersonRequest
+import com.paganini.voxvault.dataClass.ExplorerPage
+import com.paganini.voxvault.dataClass.PersonList
+import com.paganini.voxvault.dataClass.SpeakerAssignment
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
@@ -13,8 +22,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -69,6 +80,51 @@ internal class HttpCommunicationService(private val client: OkHttpClient = share
         }
     }
 
+    private fun explorerUrl(uploadUrl: String, path: String): okhttp3.HttpUrl.Builder {
+        val base = uploadUrl.toHttpUrl()
+        return base.newBuilder().removePathSegment(base.pathSize - 1)
+            .query(null).fragment(null).addPathSegments("api/explorer/$path")
+    }
+
+    suspend fun getConversations(
+        uploadUrl: String, query: String = "", mode: ConversationSearchMode = ConversationSearchMode.SEMANTIC,
+        assignment: String = "all", limit: Int = 25, offset: Int = 0, minSimilarity: Double = 0.75,
+    ): ExplorerPage<ConversationSummary> {
+        val url = explorerUrl(uploadUrl, "conversations")
+            .addQueryParameter("q", query).addQueryParameter("mode", mode.queryValue)
+            .addQueryParameter("assignment", assignment).addQueryParameter("limit", limit.toString())
+            .addQueryParameter("offset", offset.toString()).addQueryParameter("min_similarity", minSimilarity.toString()).build()
+        return json.decodeFromString(request(Request.Builder().url(url).build(), 4 * 1024 * 1024))
+    }
+
+    suspend fun getConversation(
+        uploadUrl: String, recordingId: Long, query: String = "",
+        mode: ConversationSearchMode = ConversationSearchMode.SEMANTIC,
+        assignment: String = "all", minSimilarity: Double = 0.75,
+    ): ConversationDetail {
+        val url = explorerUrl(uploadUrl, "conversations/$recordingId")
+            .addQueryParameter("q", query).addQueryParameter("mode", mode.queryValue)
+            .addQueryParameter("assignment", assignment).addQueryParameter("min_similarity", minSimilarity.toString()).build()
+        return json.decodeFromString(request(Request.Builder().url(url).build(), 32 * 1024 * 1024))
+    }
+
+    suspend fun getSpeakerSuggestions(uploadUrl: String, chunkId: Long): PersonList {
+        val url = explorerUrl(uploadUrl, "persons").addQueryParameter("chunk_id", chunkId.toString()).build()
+        return json.decodeFromString(request(Request.Builder().url(url).build(), 4 * 1024 * 1024))
+    }
+
+    suspend fun assignSpeaker(uploadUrl: String, chunkId: Long, personId: Long?): SpeakerAssignment {
+        val body = json.encodeToString(AssignPersonRequest(personId)).toRequestBody("application/json".toMediaType())
+        val url = explorerUrl(uploadUrl, "chunks/$chunkId/person").build()
+        return json.decodeFromString(request(Request.Builder().url(url).put(body).build(), 4 * 1024 * 1024))
+    }
+
+    suspend fun createSpeaker(uploadUrl: String, chunkId: Long, name: String): SpeakerAssignment {
+        val body = json.encodeToString(CreatePersonRequest(name, chunkId)).toRequestBody("application/json".toMediaType())
+        return json.decodeFromString(request(Request.Builder().url(explorerUrl(uploadUrl, "persons").build())
+            .post(body).build(), 4 * 1024 * 1024))
+    }
+
     private suspend fun request(request: Request, responseLimit: Long): String {
         val call = client.newCall(request)
         val finished = CompletableDeferred<Unit>()
@@ -87,7 +143,7 @@ internal class HttpCommunicationService(private val client: OkHttpClient = share
                                 if (!it.isSuccessful) throw HttpFailure(it.code)
                                 val source = it.body.source()
                                 if (source.request(responseLimit + 1)) {
-                                    throw IOException("Upload response exceeds $responseLimit bytes")
+                                    throw IOException("Server response exceeds $responseLimit bytes")
                                 }
                                 source.readUtf8()
                             }

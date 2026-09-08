@@ -29,6 +29,7 @@ import encryption
 import explorer_service
 import main
 import setup_service
+from conversation_embeddings import backfill_conversation_embeddings
 
 
 def vector(first=1, second=0, dimensions=VOICE_EMBEDDING_DIM):
@@ -284,7 +285,7 @@ class ExplorerTests(unittest.TestCase):
         self.assert_profile(person_id, None, 0)
         self.assert_profile(response.json()["person"]["id"], vector(), 3)
 
-    def test_invalid_sources_are_rejected_without_creating_or_assigning_people(self):
+    def test_manual_assignment_without_valid_voice_preserves_empty_profiles(self):
         person_id = self.person()
         invalid_sources = [
             self.chunk(voice=vector(0, 0)),
@@ -304,12 +305,12 @@ class ExplorerTests(unittest.TestCase):
         for chunk_id in invalid_sources:
             with self.subTest(chunk_id=chunk_id):
                 response = self.client.post("/api/explorer/persons", json={"name": "Invalid", "chunkId": chunk_id})
-                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.status_code, 201, response.text)
+                self.assertFalse(response.json()["person"]["hasVoiceEmbedding"])
                 response = self.client.put(f"/api/explorer/chunks/{chunk_id}/person", json={"personId": person_id})
-                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.status_code, 200, response.text)
                 with self.sessions() as session:
-                    self.assertEqual(session.scalar(select(func.count()).select_from(Person)), 1)
-                    self.assertIsNone(session.get(TranscriptionChunk, chunk_id).person_id)
+                    self.assertEqual(session.get(TranscriptionChunk, chunk_id).person_id, person_id)
         self.assert_profile(person_id, None, 0)
 
     def test_rename_trims_name_and_rejects_blank_or_overlong_values(self):
@@ -357,7 +358,7 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(self.get("chunks", assignment="assigned")["total"], 1)
         self.assertEqual(self.get("chunks", assignment="unassigned")["total"], 2)
 
-    def test_default_view_is_unassigned_and_search_is_text_only(self):
+    def test_legacy_chunk_defaults_remain_compatible_and_semantic_search_is_available(self):
         person_id = self.person()
         unassigned = self.chunk(spoken="Thursday meeting")
         assigned = self.chunk(spoken="Thursday meeting", person_id=person_id)
@@ -368,8 +369,171 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(self.get("chunks")["total"], 2)
         self.assertEqual(self.get("chunks", assignment="all")["total"], 3)
         self.assertEqual([item["id"] for item in self.get("chunks", q="Thursday", assignment="assigned")["items"]], [assigned])
-        response = self.client.get("/api/explorer/chunks", params={"q": "Thursday", "mode": "semantic"})
-        self.assertEqual(response.status_code, 422)
+        with patch.object(explorer_service, "query_embedding", return_value=vector(dimensions=TEXT_EMBEDDING_DIM)):
+            page = self.get("chunks", q="Thursday", mode="semantic")
+        self.assertEqual(page["total"], 2)
+        self.assertTrue(all(item["similarity"] > .99 for item in page["items"]))
+
+    def test_conversations_are_distinct_paginated_and_include_empty_recordings(self):
+        first = self.recording()
+        self.chunk(recording_id=first, words=3)
+        self.chunk(recording_id=first, chunk_index=1, words=4)
+        empty = self.recording()
+        with patch.object(explorer_service, "query_embedding", side_effect=AssertionError("No inference for browse")):
+            page = self.get("conversations", limit=1)
+            detail = self.get(f"conversations/{empty}")
+        self.assertEqual(page["total"], 2)
+        self.assertEqual(page["items"][0]["id"], empty)
+        self.assertEqual(detail["chunks"], [])
+        item = self.get("conversations", limit=1, offset=1)["items"][0]
+        self.assertEqual((item["id"], item["chunkCount"], item["wordCount"]), (first, 2, 7))
+        self.assertEqual(item["durationMs"], 2000)
+
+    def test_full_conversation_keeps_context_and_orders_by_time_before_index(self):
+        recording = self.recording()
+        later = self.chunk(recording_id=recording, chunk_index=10, spoken="The deadline is Thursday.")
+        early = self.chunk(recording_id=recording, chunk_index=0, spoken="What is the deadline?")
+        middle = self.chunk(recording_id=recording, chunk_index=4, spoken="Let me check.")
+        with self.sessions.begin() as session:
+            session.get(TranscriptionChunk, early).chunk_index = 30
+        detail = self.get(f"conversations/{recording}", q="THURSDAY", mode="text")
+        self.assertEqual([item["id"] for item in detail["chunks"]], [early, middle, later])
+        self.assertEqual(detail["matchedChunkIds"], [later])
+        self.assertEqual([item["matched"] for item in detail["chunks"]], [False, False, True])
+        self.assertEqual(detail["chunks"][0]["text"], "What is the deadline?")
+
+    def test_semantic_search_groups_all_matches_and_preserves_unmatched_context(self):
+        recording = self.recording()
+        first = self.chunk(recording_id=recording, spoken="The annual budget", text_vector=vector(1, 0, TEXT_EMBEDDING_DIM))
+        second = self.chunk(recording_id=recording, chunk_index=1, spoken="Funding the project", text_vector=vector(1, .5, TEXT_EMBEDDING_DIM))
+        context = self.chunk(recording_id=recording, chunk_index=2, text_vector=vector(0, 1, TEXT_EMBEDDING_DIM))
+        self.chunk(text_vector=vector(-1, 0, TEXT_EMBEDDING_DIM))
+        with patch.object(explorer_service, "query_embedding", return_value=vector(dimensions=TEXT_EMBEDDING_DIM)):
+            page = self.get("conversations", q="financial planning")
+            detail = self.get(f"conversations/{recording}", q="financial planning")
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["items"][0]["matchedChunkIds"], [first, second])
+        self.assertAlmostEqual(page["items"][0]["similarity"], 1)
+        self.assertEqual(detail["matchedChunkIds"], [first, second])
+        self.assertEqual(detail["chunks"][-1]["id"], context)
+        self.assertFalse(detail["chunks"][-1]["matched"])
+
+    def test_theme_search_uses_aggregate_instead_of_best_chunk(self):
+        focused = self.recording()
+        self.chunk(recording_id=focused, text_vector=vector(1, 1, TEXT_EMBEDDING_DIM))
+        mixed = self.recording()
+        self.chunk(recording_id=mixed, text_vector=vector(1, 0, TEXT_EMBEDDING_DIM), words=1)
+        self.chunk(recording_id=mixed, chunk_index=1, text_vector=vector(0, 1, TEXT_EMBEDDING_DIM), words=9)
+        with self.sessions.begin() as session:
+            backfill_conversation_embeddings(session)
+        with patch.object(explorer_service, "query_embedding", return_value=vector(dimensions=TEXT_EMBEDDING_DIM)):
+            segments = self.get("conversations", q="budget", min_similarity=0)
+            themes = self.get("conversations", q="budget", mode="conversation", min_similarity=0)
+            detail = self.get(f"conversations/{focused}", q="budget", mode="conversation")
+        self.assertEqual([item["id"] for item in segments["items"]], [mixed, focused])
+        self.assertEqual([item["id"] for item in themes["items"]], [focused, mixed])
+        self.assertAlmostEqual(detail["similarity"], 1 / np.sqrt(2), places=6)
+
+    def test_semantic_cutoff_excludes_weak_matches_and_can_be_adjusted(self):
+        strong = self.chunk(text_vector=vector(.8, .6, TEXT_EMBEDDING_DIM))
+        weak = self.chunk(text_vector=vector(.6, .8, TEXT_EMBEDDING_DIM))
+        with patch.object(explorer_service, "query_embedding", return_value=vector(dimensions=TEXT_EMBEDDING_DIM)):
+            page = self.get("conversations", q="budget")
+            broader = self.get("conversations", q="budget", min_similarity=.5)
+        self.assertEqual([id for item in page["items"] for id in item["matchedChunkIds"]], [strong])
+        self.assertEqual({id for item in broader["items"] for id in item["matchedChunkIds"]}, {strong, weak})
+
+    def test_cached_inference_vectors_work_across_database_search_paths(self):
+        recording = self.recording()
+        chunk = self.chunk(recording_id=recording)
+        with self.sessions.begin() as session:
+            backfill_conversation_embeddings(session)
+        explorer_service.query_embedding.cache_clear()
+        self.addCleanup(explorer_service.query_embedding.cache_clear)
+        with patch("audio_processer.create_query_embedding", return_value=vector(dimensions=TEXT_EMBEDDING_DIM)) as inference:
+            for mode in ("semantic", "conversation"):
+                page = self.get("conversations", q="budget", mode=mode)
+                self.assertEqual(page["items"][0]["matchedChunkIds"], [chunk])
+                detail = self.get(f"conversations/{recording}", q="budget", mode=mode)
+                self.assertEqual(detail["matchedChunkIds"], [chunk])
+            self.assertEqual(self.get("chunks", q="budget", mode="semantic")["items"][0]["id"], chunk)
+            inference.assert_called_once_with("budget")
+
+    def test_conversation_text_search_escapes_wildcards_and_filters_matches_only(self):
+        recording = self.recording()
+        owner = self.person()
+        assigned = self.chunk(recording_id=recording, spoken="100% complete_under", person_id=owner)
+        self.chunk(recording_id=recording, chunk_index=1, spoken="100% complete_under")
+        self.chunk(spoken="1000 completeXunder")
+        page = self.get("conversations", q="100%", mode="text", assignment="assigned")
+        self.assertEqual(page["total"], 1)
+        self.assertEqual(page["items"][0]["matchedChunkIds"], [assigned])
+        detail = self.get(f"conversations/{recording}", q="complete_", mode="text", assignment="assigned")
+        self.assertEqual(detail["chunkCount"], 2)
+        self.assertEqual(detail["matchedChunkIds"], [assigned])
+
+    def test_backfill_normalizes_word_weighted_text_vectors_and_is_idempotent(self):
+        recording = self.recording()
+        self.chunk(recording_id=recording, text_vector=vector(5, 0, TEXT_EMBEDDING_DIM), words=1)
+        self.chunk(recording_id=recording, chunk_index=1, text_vector=vector(0, 3, TEXT_EMBEDDING_DIM), words=3)
+        self.chunk(recording_id=recording, chunk_index=2, text_vector=vector(0, 0, TEXT_EMBEDDING_DIM), words=20)
+        empty = self.recording()
+        with self.sessions.begin() as session:
+            backfill_conversation_embeddings(session)
+            result = session.get(Recording, recording)
+            np.testing.assert_allclose(result.text_embedding, np.asarray(vector(1, 3, TEXT_EMBEDDING_DIM)) / np.sqrt(10), atol=1e-6)
+            self.assertIsNone(session.get(Recording, empty).text_embedding)
+            self.assertEqual(session.get(Recording, empty).text_embedding_version, 1)
+            with patch("conversation_embeddings.conversation_embedding", side_effect=AssertionError("Already migrated")):
+                backfill_conversation_embeddings(session)
+
+    def test_save_and_delete_refresh_aggregate_and_last_deletion_clears_it(self):
+        recording = Recording(timestamp=123456789, chunks=[TranscriptionChunk(
+            chunk_index=0, text="Budget", word_count=1, start_ms=0, end_ms=1000,
+            text_embedding=vector(1, 0, TEXT_EMBEDDING_DIM), voice_embedding=vector(),
+        ), TranscriptionChunk(
+            chunk_index=1, text="Schedule", word_count=3, start_ms=1000, end_ms=2000,
+            text_embedding=vector(0, 1, TEXT_EMBEDDING_DIM), voice_embedding=vector(),
+        )])
+        db_interaction.save_recording(recording)
+        with self.sessions() as session:
+            stored = session.scalar(select(Recording).where(Recording.timestamp == 123456789))
+            recording_id = stored.id
+            ids = [chunk.id for chunk in stored.chunks]
+            np.testing.assert_allclose(stored.text_embedding, np.asarray(vector(1, 3, TEXT_EMBEDDING_DIM)) / np.sqrt(10), atol=1e-6)
+        self.assertEqual(self.client.delete(f"/api/explorer/chunks/{ids[0]}").status_code, 204)
+        with self.sessions() as session:
+            np.testing.assert_allclose(session.get(Recording, recording_id).text_embedding, vector(0, 1, TEXT_EMBEDDING_DIM))
+        self.assertEqual(self.client.delete(f"/api/explorer/chunks/{ids[1]}").status_code, 204)
+        with self.sessions() as session:
+            self.assertIsNone(session.get(Recording, recording_id).text_embedding)
+
+    def test_conversation_search_errors_are_bounded_and_not_cached(self):
+        for params in ({"mode": "invalid"}, {"limit": 101}, {"offset": -1},
+                       {"min_similarity": "nan"}, {"min_similarity": 2}):
+            self.assertEqual(self.client.get("/api/explorer/conversations", params=params).status_code, 422)
+        self.assertEqual(self.client.get("/api/explorer/conversations/99999").status_code, 404)
+        with patch.object(explorer_service, "query_embedding", side_effect=explorer_service.ExplorerError(503, "Model unavailable")):
+            response = self.client.get("/api/explorer/conversations", params={"q": "budget"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+
+    def test_postgres_schema_upgrade_preserves_records_and_backfills(self):
+        if self.engine.dialect.name != "postgresql":
+            self.skipTest("Requires EXPLORER_TEST_DATABASE_URL")
+        from db.database import migrate_conversations
+
+        recording = self.recording()
+        chunk = self.chunk(recording_id=recording)
+        schema = self.engine.get_execution_options()["schema_translate_map"][None]
+        with self.engine.begin() as connection:
+            connection.exec_driver_sql(f'SET LOCAL search_path TO "{schema}", public')
+            connection.exec_driver_sql("ALTER TABLE recording DROP COLUMN text_embedding, DROP COLUMN text_embedding_version")
+            migrate_conversations(connection)
+            migrate_conversations(connection)
+        detail = self.get(f"conversations/{recording}")
+        self.assertTrue(detail["hasTextEmbedding"])
+        self.assertEqual([item["id"] for item in detail["chunks"]], [chunk])
 
     def test_person_list_includes_empty_profiles_and_ranks_comparison(self):
         opposite = self.person("Opposite", vector(-1, 0))

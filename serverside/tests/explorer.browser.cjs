@@ -9,6 +9,7 @@ async function fixture(page) {
   let failDelete = false;
   let deletions = 0;
   const searches = [];
+  let failSearch = false;
   let chunks = Array.from({ length: 26 }, (_, index) => ({
     id: index + 1, recordingId: index + 1, recordingTimestamp: 1700000000000 + index * 1000,
     chunkIndex: 0, language: 'en', text: `Conversation ${index + 1} about Thursday's meeting.`,
@@ -17,6 +18,29 @@ async function fixture(page) {
     hasVoiceEmbedding: index !== 25, similarity: null,
   }));
   const people = [{ id: 1, name: 'Morgan' }];
+  chunks.push(...Array.from({ length: 30 }, (_, index) => ({
+    ...chunks[0], id: 100 + index, recordingId: 1, chunkIndex: index + 1,
+    startMs: (index + 1) * 2000, endMs: (index + 2) * 2000,
+    text: index === 20 ? 'Funding the upcoming project. '.repeat(100) : `Context segment ${index + 1}. Full dialogue remains visible.`,
+    personId: null, personName: null, hasVoiceEmbedding: index !== 29,
+  })));
+  const recordingIds = Array.from({ length: 26 }, (_, index) => index + 1);
+  const conversation = (id, url) => {
+    const segments = chunks.filter(chunk => chunk.recordingId === id).sort((a, b) => a.startMs - b.startMs);
+    const query = url.searchParams.get('q') || '';
+    const assignment = url.searchParams.get('assignment') || 'all';
+    const mode = url.searchParams.get('mode') || 'semantic';
+    const matched = segments.filter(chunk => query &&
+      (assignment === 'all' || (assignment === 'assigned') === (chunk.personId !== null)) &&
+      (mode !== 'text' ? [1, 120].includes(chunk.id) : chunk.text.toLowerCase().includes(query.toLowerCase())));
+    return { id, timestamp: 1700000000000 + id * 1000, language: 'en',
+      chunkCount: segments.length, wordCount: segments.reduce((n, chunk) => n + chunk.wordCount, 0),
+      durationMs: segments.at(-1)?.endMs || 0, personCount: new Set(segments.map(chunk => chunk.personId).filter(Boolean)).size,
+      preview: segments[0]?.text || '', hasTextEmbedding: !!segments.length, similarity: query && mode !== 'text' ? 0.9 : null,
+      matchedChunkIds: matched.map(chunk => chunk.id),
+      chunks: segments.map(chunk => ({ ...chunk, matched: matched.includes(chunk) })),
+    };
+  };
   const profile = person => {
     const known = chunks.filter(chunk => chunk.personId === person.id);
     return { ...person, chunkCount: known.length, recordingCount: known.length,
@@ -36,6 +60,18 @@ async function fixture(page) {
       const file = url.pathname.startsWith('/static/') ? url.pathname.slice(8) : 'explorer.html';
       const contentType = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : file.endsWith('.svg') ? 'image/svg+xml' : 'text/html';
       return route.fulfill({ body: await fs.readFile(path.join(staticRoot, file)), contentType });
+    }
+    if (endpoint === '/conversations') {
+      searches.push(Object.fromEntries(url.searchParams));
+      if (failSearch && url.searchParams.get('q')) return json({ detail: 'Semantic search temporarily unavailable.' }, 503);
+      let items = recordingIds.map(id => conversation(id, url)).reverse();
+      if (url.searchParams.get('q')) items = items.filter(item => item.matchedChunkIds.length);
+      return json(paginate(items, url));
+    }
+    const conversationMatch = endpoint.match(/^\/conversations\/(\d+)$/);
+    if (conversationMatch) {
+      const id = Number(conversationMatch[1]);
+      return recordingIds.includes(id) ? json(conversation(id, url)) : json({ detail: 'Conversation not found.' }, 404);
     }
     const chunkMatch = endpoint.match(/^\/chunks\/(\d+)(\/person)?$/);
     if (chunkMatch) {
@@ -64,7 +100,7 @@ async function fixture(page) {
         Object.assign(chunk, { personId: person.id, personName: name });
         return json({ chunk, person: profile(person) }, 201);
       }
-      return json({ items: people.map(profile) });
+      return json({ items: people.map(profile).sort((a, b) => (b.similarity ?? -2) - (a.similarity ?? -2)) });
     }
     const personMatch = endpoint.match(/^\/persons\/(\d+)(\/chunks)?$/);
     if (personMatch) {
@@ -87,12 +123,13 @@ async function fixture(page) {
     }
     throw new Error(`Unexpected request: ${request.method()} ${url.pathname}`);
   });
-  return { failDeletion: value => { failDelete = value; }, deletionCount: () => deletions, searches };
+  return { failDeletion: value => { failDelete = value; }, failSearch: value => { failSearch = value; }, deletionCount: () => deletions, searches };
 }
 
 async function fits(page) {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.equal(await page.locator('#inspector').evaluate(node => node.open && node.scrollWidth > node.clientWidth), false);
+  assert.equal(await page.locator('#speaker-picker').evaluate(node => node.open && node.scrollWidth > node.clientWidth), false);
 }
 
 async function run(browser, viewport) {
@@ -101,76 +138,126 @@ async function run(browser, viewport) {
   page.on('pageerror', error => errors.push(error.message));
   const data = await fixture(page);
   await page.goto('http://voxvault.test/ui/explorer?app=1');
-  await page.waitForFunction(() => document.querySelector('#search-results article:last-child'));
-  assert.equal(await page.locator('#search-mode').count(), 0);
-  assert.equal(await page.locator('#search-assignment').inputValue(), 'unassigned');
-  assert.equal(await page.locator('#search-results article').count(), 24);
-  assert.equal(data.searches[0].mode, 'text');
-  assert.equal(data.searches[0].assignment, 'unassigned');
+  await page.locator('#conversations-results [data-recording-id="26"]').waitFor();
+  assert.equal(await page.locator('#conversations-results .conversation-row').count(), 25);
+  assert.equal(await page.locator('#search-assignment').inputValue(), 'all');
+  assert.equal(await page.locator('#search-mode').inputValue(), 'semantic');
+  assert.equal(await page.locator('.explorer-heading').isVisible(), false);
   await fits(page);
   if (process.env.VOXVAULT_SCREENSHOT_DIR) {
     await fs.mkdir(process.env.VOXVAULT_SCREENSHOT_DIR, { recursive: true });
     await page.screenshot({ path: path.join(process.env.VOXVAULT_SCREENSHOT_DIR, `explorer-${viewport.width}.png`) });
   }
+  await page.locator('#conversations-pagination button[title="Next page"]').click();
+  await page.locator('#conversations-results [data-recording-id="1"]').click();
+  await page.locator('#segment-129').waitFor();
+  assert.equal(await page.locator('.dialogue-segment').count(), 31);
+  const times = await page.locator('.dialogue-segment').evaluateAll(nodes => nodes.map(node => Number(node.dataset.chunkId)));
+  assert.deepEqual(times, [1, ...Array.from({ length: 30 }, (_, i) => 100 + i)]);
+  await page.locator('#back-to-results').click();
+  await page.locator('#conversations-results [data-recording-id="1"]').waitFor();
+  assert.equal(await page.locator('#conversations-results .conversation-row').count(), 1);
+
+  await page.locator('#search-tab').click();
+  await page.locator('#search-query').fill('financial planning');
+  await page.locator('#search-submit').click();
+  await page.waitForFunction(() => document.querySelector('#search-summary').textContent === '1 conversation found');
+  assert.equal(data.searches.at(-1).mode, 'semantic');
+  await page.locator('#search-results [data-recording-id="1"]').click();
+  await page.locator('#segment-120.matched').waitFor();
+  assert.equal(await page.locator('.dialogue-segment').count(), 31);
+  assert.equal(await page.locator('.dialogue-segment.matched').count(), 2);
+  assert.equal(await page.locator('#segment-120 .transcript').textContent(), 'Funding the upcoming project. '.repeat(100));
+  await page.locator('#next-match').click();
+  await page.waitForFunction(() => document.querySelector('#match-summary').textContent.startsWith('Match 2 of 2'));
+  await page.waitForFunction(() => {
+    const rect = document.querySelector('#segment-120').getBoundingClientRect();
+    return rect.top >= 0 && rect.top < innerHeight;
+  });
+  assert.equal(await page.locator('#next-match').isDisabled(), true);
+  await fits(page);
+  if (process.env.VOXVAULT_SCREENSHOT_DIR) {
+    await page.screenshot({ path: path.join(process.env.VOXVAULT_SCREENSHOT_DIR, `conversation-${viewport.width}.png`) });
+  }
+  await page.reload();
+  await page.locator('#segment-120.matched').waitFor();
+  assert.equal(await page.locator('.dialogue-segment').count(), 31);
+  await page.evaluate(() => window.voxvaultBack());
+  await page.locator('#search-view:not(.hidden)').waitFor();
+  assert.equal(await page.locator('#search-query').inputValue(), 'financial planning');
+
+  await page.locator('#search-mode').selectOption('conversation');
+  await page.waitForFunction(() => document.querySelector('#search-results').textContent.includes('Conversation theme match'));
   await page.locator('#search-query').fill('Thursday');
-  await page.locator('#search-form').evaluate(form => form.requestSubmit());
-  await page.waitForFunction(() => document.querySelector('#search-results').getAttribute('aria-busy') === 'false');
-  assert.equal(data.searches.at(-1).q, 'Thursday');
-  assert.equal(data.searches.at(-1).mode, 'text');
-  await page.locator('#search-query').fill('');
-  await page.locator('#search-assignment').selectOption('all');
-  await page.waitForFunction(() => document.querySelector('#search-results').children.length === 25);
+  await page.locator('#search-mode').selectOption('text');
+  await page.waitForFunction(() => document.querySelector('#search-summary').textContent === '26 conversations found');
+  await page.locator('#search-pagination button[title="Next page"]').click();
+  await page.locator('#search-results [data-recording-id="1"]').click();
+  await page.locator('#segment-1 mark.text-match').waitFor();
+  assert.equal(await page.locator('#segment-1 mark.text-match').textContent(), 'Thursday');
+
+  await page.locator('#segment-129 .dialogue-speaker button').click();
+  await page.locator('#speaker-options [data-person-id="1"]').waitFor();
+  assert.equal(await page.locator('#speaker-status').textContent(), 'No voice comparison available');
+  await page.locator('#speaker-options [data-person-id="1"]').click();
+  await page.waitForFunction(() => !document.querySelector('#speaker-picker').open);
+  assert.equal(await page.locator('#segment-129 .dialogue-speaker button').textContent(), 'Morgan');
+  await page.locator('#segment-129 .dialogue-speaker button').click();
+  await page.locator('#speaker-unassign').click();
+  await page.waitForFunction(() => !document.querySelector('#speaker-picker').open);
+  assert.equal(await page.locator('#segment-129 .dialogue-speaker button').textContent(), 'Assign speaker');
+
+  await page.locator('#segment-120 .dialogue-speaker button').click();
+  await page.locator('#speaker-new-name').fill('A'.repeat(200));
+  await page.locator('#speaker-create-form button').click();
+  await page.waitForFunction(() => !document.querySelector('#speaker-picker').open);
   await fits(page);
-  assert.equal(await page.locator('.explorer-heading').isVisible(), false);
-  await page.getByRole('button', { name: 'Next page', exact: true }).click();
-  await page.locator('#search-results [data-chunk-id="1"]').waitFor();
-  await page.getByRole('button', { name: 'Delete chunk #1', exact: true }).click();
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  assert.equal(data.deletionCount(), 0);
+  await page.locator('#segment-120 .dialogue-speaker button').click();
+  await page.locator('#speaker-options [data-person-id="2"]').waitFor();
+  await fits(page);
+  if (process.env.VOXVAULT_SCREENSHOT_DIR) {
+    await page.screenshot({ path: path.join(process.env.VOXVAULT_SCREENSHOT_DIR, `speaker-${viewport.width}.png`) });
+  }
+  await page.evaluate(() => window.voxvaultBack());
+  assert.equal(await page.locator('#speaker-picker').isVisible(), false);
 
-  data.failDeletion(true);
-  await page.getByRole('button', { name: 'Delete chunk #1', exact: true }).click();
-  await page.locator('#delete-confirmation button[value="delete"]').click();
-  await page.locator('#page-error:not(.hidden)').waitFor();
-  assert.equal(await page.locator('#search-results article').count(), 1);
-  data.failDeletion(false);
-  await page.getByRole('button', { name: 'Delete chunk #1', exact: true }).click();
-  await page.locator('#delete-confirmation button[value="delete"]').click();
-  await page.waitForFunction(() => document.querySelector('#page-status').textContent === 'Chunk #1 deleted.');
-  assert.equal(await page.locator('#search-results article').count(), 25);
-  assert.equal(await page.locator('#search-pagination .previous').isDisabled(), true);
-
-  await page.locator('#search-results [data-chunk-id="2"] button').first().click();
+  await page.locator('#segment-120').getByRole('button', { name: 'Inspect voice' }).click();
   await page.locator('#person-profile:not(.hidden)').waitFor();
-  await page.waitForFunction(() => document.querySelector('#person-statistics').textContent.includes('1 confirmed chunk'));
   await fits(page);
-  await page.locator('#selected-chunk .danger-icon').click();
-  await page.locator('#delete-confirmation button[value="delete"]').click();
-  await page.waitForFunction(() => document.querySelector('#inspector-status').textContent === 'Chunk #2 deleted.');
-  assert.equal(await page.locator('#selected-chunk-section').isVisible(), false);
-  assert.match(await page.locator('#person-statistics').textContent(), /0 confirmed chunks/);
-  assert.equal(await page.locator('#candidate-summary').textContent(), 'No voice embedding selected.');
-  await page.locator('#close-inspector').click();
-
-  await page.locator('#search-results [data-chunk-id="26"] .danger-icon').click();
-  await page.locator('#delete-confirmation button[value="delete"]').click();
-  await page.waitForFunction(() => document.querySelector('#page-status').textContent === 'Chunk #26 deleted.');
-  await page.locator('#search-results [data-chunk-id="25"] button').first().click();
-  await page.locator('#new-person-name').fill('Taylor');
-  await page.locator('#create-person-button').click();
-  await page.waitForFunction(() => document.querySelector('#inspector-status').textContent.includes('Taylor created'));
-  await page.locator('#person-name').fill('A'.repeat(200));
+  await page.locator('#person-name').fill('Taylor');
   await page.locator('#save-person-name').click();
   await page.waitForFunction(() => document.querySelector('#inspector-status').textContent === 'Person name saved.');
-  await fits(page);
-  await page.locator('#unassign-selected').click();
-  await page.waitForFunction(() => document.querySelector('#inspector-status').textContent.includes('now unassigned'));
-  await page.locator('#assign-selected').click();
-  await page.waitForFunction(() => document.querySelector('#inspector-status').textContent.includes('Voice profile updated.'));
+  await page.locator('#close-inspector').click();
+  assert.equal(await page.locator('#segment-120 .dialogue-speaker button').textContent(), 'Taylor');
+
+  await page.locator('#segment-1 .danger-icon').click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(data.deletionCount(), 0);
+  data.failDeletion(true);
+  await page.locator('#segment-1 .danger-icon').click();
+  await page.locator('#delete-confirmation button[value="delete"]').click();
+  await page.locator('#page-error:not(.hidden)').waitFor();
+  assert.equal(await page.locator('.dialogue-segment').count(), 31);
+  data.failDeletion(false);
+  await page.locator('#segment-1 .danger-icon').click();
+  await page.locator('#delete-confirmation button[value="delete"]').click();
+  await page.waitForFunction(() => document.querySelector('#page-status').textContent === 'Chunk #1 deleted.');
+  assert.equal(await page.locator('.dialogue-segment').count(), 30);
+  assert.equal(await page.locator('.dialogue-segment.matched').count(), 0);
+
+  await page.locator('#back-to-results').click();
+  await page.locator('#search-view:not(.hidden)').waitFor();
+  data.failSearch(true);
+  await page.locator('#search-submit').click();
+  await page.locator('#page-error:not(.hidden)').waitFor();
+  assert.equal(await page.locator('#search-results .conversation-row').count(), 0);
+  data.failSearch(false);
+  await page.locator('#search-submit').click();
+  await page.waitForFunction(() => document.querySelector('#search-summary').textContent === '25 conversations found');
   await fits(page);
   assert.deepEqual(errors, []);
   await page.close();
-  console.log(`PASS ${viewport.width}x${viewport.height}: deletion, cancellation, failure, pagination, profiles, assignment, layout`);
+  console.log(`PASS ${viewport.width}x${viewport.height}: conversation navigation, semantic/text/theme search, highlights, speaker assignment, deletion, errors, layout`);
 }
 
 (async () => {

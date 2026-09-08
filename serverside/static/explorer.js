@@ -7,10 +7,12 @@
   const state = {
     people: [], person: null, chunk: null, known: [], knownChunkId: null,
     searchOffset: 0, knownOffset: 0, candidateOffset: 0,
-    searchQuery: "", searchAssignment: "unassigned",
+    searchQuery: "", searchAssignment: "all", searchMode: "semantic",
+    view: "conversations", conversation: null, conversationId: null, conversationsOffset: 0,
+    context: {}, matchIndex: 0, speakerChunk: null, speakerPeople: [],
     source: "chunk", scope: "other", busy: false,
   };
-  const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0 };
+  const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0, conversations: 0, conversation: 0, speaker: 0 };
   let pendingDeletion = null;
   if (new URLSearchParams(location.search).get("app") === "1") document.body.classList.add("in-app");
 
@@ -38,13 +40,14 @@
   }
 
   function showError(error, inInspector = $("#inspector").open) {
-    const target = $(inInspector ? "#inspector-error" : "#page-error");
+    const target = $($("#speaker-picker").open ? "#speaker-error" : inInspector ? "#inspector-error" : "#page-error");
     target.textContent = error.message || "The request failed. Please try again.";
     target.classList.remove("hidden");
   }
 
   function clearError(inInspector) {
     $(inInspector ? "#inspector-error" : "#page-error").classList.add("hidden");
+    $("#speaker-error").classList.add("hidden");
   }
 
   async function request(path, options = {}) {
@@ -168,6 +171,10 @@
       inspectButton.disabled = !chunk.hasVoiceEmbedding;
       if (!chunk.hasVoiceEmbedding) inspectButton.title = "No voice embedding is available for this chunk";
       actions.append(inspectButton);
+      actions.append(button("Full conversation", "arrow-right", () => {
+        $("#inspector").close();
+        navigate("conversation", { id: chunk.recordingId, chunk: chunk.id, from: state.view });
+      }));
     }
     if (candidate && state.person) {
       if (chunk.personId === state.person.id) {
@@ -178,8 +185,7 @@
       } else {
         const assignment = button(chunk.personId == null ? "Assign" : "Reassign", "check", () => assignChunk(chunk.id, state.person.id), "compact");
         assignment.dataset.mutation = "";
-        assignment.dataset.unavailable = String(!chunk.hasVoiceEmbedding);
-        assignment.disabled = state.busy || !chunk.hasVoiceEmbedding;
+        assignment.disabled = state.busy;
         assignment.title = chunk.personId == null ? `Assign to ${personName(state.person)}` : `Move from ${ownerName(chunk)} to ${personName(state.person)}`;
         actions.append(assignment);
       }
@@ -218,14 +224,14 @@
     $("#search-summary").textContent = "Searching conversations...";
     $("#search-submit").disabled = true;
     try {
-      const params = new URLSearchParams({ q: state.searchQuery, mode: "text", assignment: state.searchAssignment, offset, limit: pageSize });
-      const page = await request(`/chunks?${params}`);
+      const params = new URLSearchParams({ q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment, offset, limit: pageSize });
+      const page = await request(`/conversations?${params}`);
       if (version !== epochs.search) return;
       if (page.total && offset >= page.total) return await loadSearch(Math.floor((page.total - 1) / pageSize) * pageSize);
-      $("#search-summary").textContent = `${count(page.total, "chunk")}${state.searchQuery ? " found" : " in your archive"}`;
-      $("#search-results").replaceChildren(...page.items.map(chunk => chunkContent(chunk, { search: true })));
-      if (!page.items.length) $("#search-results").append(element("p", "empty-state", state.searchQuery ? "No matching conversation chunks." : "No conversation chunks found."));
-      renderPagination("#search-pagination", page, loadSearch);
+      $("#search-summary").textContent = `${count(page.total, "conversation")}${state.searchQuery ? " found" : " in your archive"}`;
+      $("#search-results").replaceChildren(...page.items.map(item => conversationRow(item, true)));
+      if (!page.items.length) $("#search-results").append(element("p", "empty-state", "No matching conversations."));
+      renderPagination("#search-pagination", page, offset => navigate("search", { offset }));
     } catch (error) {
       if (version !== epochs.search) return;
       $("#search-summary").textContent = "Conversation search unavailable";
@@ -238,6 +244,187 @@
         $("#search-submit").disabled = false;
       }
     }
+  }
+
+  function conversationRow(item, searched = false) {
+    const row = button("", null, () => navigate("conversation", {
+      id: item.id, from: searched ? "search" : "conversations",
+    }), "conversation-row");
+    row.dataset.recordingId = item.id;
+    const content = element("span", "conversation-description");
+    content.append(element("strong", "", `Conversation - ${timestamp(item.timestamp)}`));
+    content.append(element("span", "muted", `${count(item.chunkCount, "segment")} / ${count(item.wordCount, "word")} / ${timecode(item.durationMs)}${item.language ? ` / ${item.language}` : ""}`));
+    content.append(element("span", "conversation-preview", item.preview || "No transcript available."));
+    if (searched && state.searchQuery) {
+      content.append(element("span", "match-count", state.searchMode === "conversation" ? "Conversation theme match" : count(item.matchedChunkIds.length, "matching segment")));
+      if (finite(item.similarity)) content.append(score(item.similarity, "Text cosine similarity"));
+    }
+    row.append(content, icon("arrow-right"));
+    return row;
+  }
+
+  async function loadConversations(offset = 0) {
+    const version = ++epochs.conversations;
+    state.conversationsOffset = offset;
+    $("#conversations-results").setAttribute("aria-busy", "true");
+    $("#conversations-summary").textContent = "Loading conversations...";
+    clearError(false);
+    try {
+      const page = await request(`/conversations?limit=${pageSize}&offset=${offset}`);
+      if (version !== epochs.conversations) return;
+      if (page.total && offset >= page.total) return await loadConversations(Math.floor((page.total - 1) / pageSize) * pageSize);
+      $("#conversations-summary").textContent = count(page.total, "conversation");
+      $("#conversations-results").replaceChildren(...page.items.map(item => conversationRow(item)));
+      if (!page.items.length) $("#conversations-results").append(element("p", "empty-state", "No conversations yet."));
+      renderPagination("#conversations-pagination", page, offset => navigate("conversations", { offset }));
+    } catch (error) {
+      if (version !== epochs.conversations) return;
+      $("#conversations-summary").textContent = "Conversations unavailable";
+      $("#conversations-results").replaceChildren();
+      $("#conversations-pagination").replaceChildren();
+      showError(error, false);
+    } finally {
+      if (version === epochs.conversations) $("#conversations-results").setAttribute("aria-busy", "false");
+    }
+  }
+
+  function dialogueChunk(chunk) {
+    const node = element("article", `dialogue-segment${chunk.matched ? " matched" : ""}`);
+    node.id = `segment-${chunk.id}`;
+    node.dataset.chunkId = chunk.id;
+    node.tabIndex = -1;
+    const top = element("div", "dialogue-speaker");
+    const speaker = button(chunk.personId == null ? "Assign speaker" : ownerName(chunk), "users", () => openSpeakerPicker(chunk), "secondary compact");
+    speaker.dataset.mutation = "";
+    speaker.disabled = state.busy;
+    top.append(speaker, element("span", "muted", `${timecode(chunk.startMs)} - ${timecode(chunk.endMs)}`));
+    if (chunk.matched) top.append(element("span", "match-count", "Search match"));
+    const body = element("p", "transcript", chunk.text || "No transcript available.");
+    if (chunk.matched && state.context.mode === "text" && state.context.q) {
+      body.replaceChildren();
+      const source = chunk.text || "";
+      const query = state.context.q.toLocaleLowerCase();
+      let start = 0;
+      let index;
+      while ((index = source.toLocaleLowerCase().indexOf(query, start)) !== -1) {
+        body.append(document.createTextNode(source.slice(start, index)), element("mark", "text-match", source.slice(index, index + query.length)));
+        start = index + query.length;
+      }
+      body.append(document.createTextNode(source.slice(start)));
+    }
+    const actions = element("div", "inline-actions");
+    const inspect = button("Inspect voice", "audio-lines", () => inspectChunk(chunk.id));
+    inspect.dataset.mutation = "";
+    inspect.dataset.unavailable = String(!chunk.hasVoiceEmbedding);
+    inspect.disabled = !chunk.hasVoiceEmbedding || state.busy;
+    const remove = button("", "trash-2", () => confirmDeletion(chunk), "icon-button secondary danger-icon");
+    remove.title = `Delete chunk #${chunk.id}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.dataset.mutation = "";
+    remove.disabled = state.busy;
+    actions.append(inspect, remove);
+    node.append(top, body, actions);
+    return node;
+  }
+
+  async function loadConversation(id, focusId = null, scroll = true) {
+    const version = ++epochs.conversation;
+    state.conversationId = id;
+    $("#conversation-chunks").setAttribute("aria-busy", "true");
+    if (scroll) {
+      state.conversation = null;
+      $("#conversation-title").textContent = "Loading conversation...";
+      $("#conversation-metadata").textContent = "";
+      $("#conversation-chunks").replaceChildren();
+      $("#match-navigation").classList.add("hidden");
+    }
+    try {
+      const conversation = await request(`/conversations/${id}?${new URLSearchParams(state.context)}`);
+      if (version !== epochs.conversation || state.view !== "conversation") return;
+      state.conversation = conversation;
+      $("#conversation-title").textContent = `Conversation - ${timestamp(conversation.timestamp)}`;
+      $("#conversation-metadata").textContent = `${count(conversation.chunkCount, "segment")} / ${count(conversation.wordCount, "word")} / ${timecode(conversation.durationMs)} / ${count(conversation.personCount, "identified speaker")}`;
+      $("#conversation-chunks").replaceChildren(...conversation.chunks.map(dialogueChunk));
+      if (!conversation.chunks.length) $("#conversation-chunks").append(element("p", "empty-state", "This conversation has no remaining transcript segments."));
+      state.matchIndex = Math.max(0, Math.min(state.matchIndex, conversation.matchedChunkIds.length - 1));
+      renderMatches();
+      if (scroll) {
+        const targetId = focusId || conversation.matchedChunkIds[0];
+        const target = targetId && $(`#segment-${targetId}`);
+        if (target) {
+          target.focus({ preventScroll: true });
+          target.scrollIntoView({ block: "start" });
+        } else {
+          $("#conversation-title").focus({ preventScroll: true });
+          window.scrollTo(0, 0);
+        }
+      }
+    } catch (error) {
+      if (version !== epochs.conversation) return;
+      $("#conversation-title").textContent = "Conversation unavailable";
+      showError(error, false);
+    } finally {
+      if (version === epochs.conversation) $("#conversation-chunks").setAttribute("aria-busy", "false");
+    }
+  }
+
+  function renderMatches() {
+    const ids = state.conversation?.matchedChunkIds || [];
+    $("#match-navigation").classList.toggle("hidden", !state.context.q);
+    $("#match-summary").textContent = ids.length ? `Match ${state.matchIndex + 1} of ${ids.length} for "${state.context.q}"` : `No matching segments for "${state.context.q}"${state.context.mode === "conversation" ? " / Conversation theme result" : ""}`;
+    $("#previous-match").disabled = !ids.length || state.matchIndex === 0;
+    $("#next-match").disabled = !ids.length || state.matchIndex === ids.length - 1;
+  }
+
+  function moveMatch(direction) {
+    const ids = state.conversation?.matchedChunkIds || [];
+    state.matchIndex = Math.max(0, Math.min(ids.length - 1, state.matchIndex + direction));
+    const target = $(`#segment-${ids[state.matchIndex]}`);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "start" });
+    renderMatches();
+  }
+
+  async function openSpeakerPicker(chunk) {
+    if (state.busy) return;
+    const version = ++epochs.speaker;
+    state.speakerChunk = chunk;
+    state.speakerPeople = [];
+    clearError(false);
+    $("#speaker-filter").value = "";
+    $("#speaker-new-name").value = "";
+    $("#speaker-title").textContent = `Speaker / ${timecode(chunk.startMs)}`;
+    $("#speaker-sample").textContent = chunk.personId == null ? "Unassigned" : ownerName(chunk);
+    $("#speaker-status").textContent = "Loading people...";
+    $("#speaker-options").replaceChildren();
+    $("#speaker-unassign").classList.toggle("hidden", chunk.personId == null);
+    $("#speaker-picker").showModal();
+    try {
+      const result = await request(`/persons?chunk_id=${chunk.id}`);
+      if (version !== epochs.speaker) return;
+      state.speakerPeople = result.items;
+      $("#speaker-status").textContent = chunk.hasVoiceEmbedding ? "Voice similarity / highest first" : "No voice comparison available";
+      renderSpeakerOptions();
+    } catch (error) {
+      if (version === epochs.speaker) { $("#speaker-status").textContent = ""; showError(error); }
+    }
+  }
+
+  function renderSpeakerOptions() {
+    const filter = $("#speaker-filter").value.trim().toLocaleLowerCase();
+    const people = state.speakerPeople.filter(person => personName(person).toLocaleLowerCase().includes(filter));
+    $("#speaker-options").replaceChildren(...people.map(person => {
+      const row = button("", null, async () => {
+        const saved = await assignChunk(state.speakerChunk.id, person.id);
+        if (saved) $("#speaker-picker").close();
+      }, "comparison-person");
+      row.dataset.personId = person.id;
+      row.disabled = state.busy || person.id === state.speakerChunk.personId;
+      row.append(element("strong", "", personName(person)), score(person.similarity));
+      if (person.id === state.speakerChunk.personId) row.append(icon("check"));
+      return row;
+    }));
+    if (!people.length) $("#speaker-options").append(element("p", "empty-state", "No matching people."));
   }
 
   function renderPeople() {
@@ -294,9 +481,9 @@
       $("#selected-chunk-title").textContent = `Selected chunk #${state.chunk.id}`;
       $("#selected-chunk").append(chunkContent({ ...state.chunk, similarity: null }, { inspect: false, framed: false }));
     }
-    $("#create-person-button").disabled = state.busy || !state.chunk?.hasVoiceEmbedding;
-    $("#new-person-name").disabled = !state.chunk?.hasVoiceEmbedding;
-    $("#create-person-unavailable").classList.toggle("hidden", !!state.chunk?.hasVoiceEmbedding);
+    $("#create-person-button").disabled = state.busy || !state.chunk;
+    $("#new-person-name").disabled = !state.chunk;
+    $("#create-person-unavailable").classList.toggle("hidden", !!state.chunk);
     updateSourceControls();
   }
 
@@ -313,7 +500,7 @@
       const confirmed = chunk.personId === person.id;
       $("#assignment-summary").textContent = confirmed ? `Chunk #${chunk.id} is confirmed for ${personName(person)}.` : chunk.personId == null ? `Chunk #${chunk.id} is unassigned.` : `Chunk #${chunk.id} is currently assigned to ${ownerName(chunk)}. Reassignment moves it to ${personName(person)}.`;
       $("#assign-selected span").textContent = confirmed ? "Confirmed association" : chunk.personId == null ? `Assign to ${personName(person)}` : `Reassign to ${personName(person)}`;
-      $("#assign-selected").disabled = state.busy || confirmed || !chunk.hasVoiceEmbedding;
+      $("#assign-selected").disabled = state.busy || confirmed;
       $("#unassign-selected").classList.toggle("hidden", chunk.personId == null);
       $("#unassign-selected").disabled = state.busy;
     }
@@ -470,16 +657,20 @@
     await loadPeople();
     renderSelectedChunk();
     renderProfile();
-    await loadKnown(state.knownOffset);
-    await loadCandidates(state.candidateOffset);
-    await loadSearch(state.searchOffset);
+    if ($("#inspector").open) {
+      await loadKnown(state.knownOffset);
+      await loadCandidates(state.candidateOffset);
+    }
+    if (state.view === "search") await loadSearch(state.searchOffset);
+    if (state.view === "conversations") await loadConversations(state.conversationsOffset);
+    if (state.view === "conversation" && state.conversationId) await loadConversation(state.conversationId, null, false);
   }
 
   async function mutate(callback, message) {
     if (state.busy) return;
     state.busy = true;
     const inInspector = $("#inspector").open;
-    const status = $(inInspector ? "#inspector-status" : "#page-status");
+    const status = $($("#speaker-picker").open ? "#speaker-status" : inInspector ? "#inspector-status" : "#page-status");
     for (const key of Object.keys(epochs)) ++epochs[key];
     clearError(inInspector);
     status.textContent = "Saving changes...";
@@ -507,11 +698,12 @@
       renderSelectedChunk();
       renderProfile();
       renderComparison();
-      document.querySelectorAll(".chunk-list [data-mutation], #known-chunk [data-mutation]").forEach(node => {
+      document.querySelectorAll(".chunk-list [data-mutation], #known-chunk [data-mutation], .dialogue [data-mutation]").forEach(node => {
         node.disabled = node.dataset.unavailable === "true";
       });
       $("#search-submit").disabled = false;
     }
+    return saved;
   }
 
   function confirmDeletion(chunk) {
@@ -539,27 +731,106 @@
   });
 
   function assignChunk(chunkId, personId) {
-    const name = state.people.find(person => person.id === personId);
+    const name = [...state.people, ...state.speakerPeople].find(person => person.id === personId);
     return mutate(() => request(`/chunks/${chunkId}/person`, { method: "PUT", body: JSON.stringify({ personId }) }), personId == null ? `Chunk #${chunkId} is now unassigned.` : `Chunk #${chunkId} assigned to ${personName(name)}. Voice profile updated.`);
   }
 
   function setTab(tab) {
-    for (const name of ["search", "people"]) {
+    state.view = tab;
+    for (const name of ["conversations", "search", "people"]) {
       $(`#${name}-view`).classList.toggle("hidden", name !== tab);
       $(`#${name}-tab`).classList.toggle("active", name === tab);
       $(`#${name}-tab`).setAttribute("aria-pressed", String(name === tab));
     }
+    $("#conversation-view").classList.toggle("hidden", tab !== "conversation");
   }
 
-  $("#search-tab").addEventListener("click", () => setTab("search"));
-  $("#people-tab").addEventListener("click", () => setTab("people"));
+  function navigate(view, extra = {}) {
+    if (state.busy) return;
+    history.replaceState({ ...history.state, scrollY: window.scrollY }, "");
+    const route = new URLSearchParams({ view, q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment, ...extra });
+    history.pushState({ archiveNavigation: true }, "", `#${route}`);
+    renderRoute();
+  }
+
+  async function renderRoute() {
+    const route = new URLSearchParams(location.hash.slice(1));
+    const view = ["search", "people", "conversation"].includes(route.get("view")) ? route.get("view") : "conversations";
+    ++epochs.conversation;
+    ++epochs.speaker;
+    ++epochs.search;
+    ++epochs.conversations;
+    document.querySelectorAll("dialog[open]").forEach(dialog => { dialog.returnValue = "cancel"; dialog.close(); });
+    clearError(false);
+    $("#page-status").textContent = "";
+    state.searchQuery = (route.get("q") || "").slice(0, 2000);
+    state.searchMode = ["text", "conversation"].includes(route.get("mode")) ? route.get("mode") : "semantic";
+    state.searchAssignment = ["assigned", "unassigned"].includes(route.get("assignment")) ? route.get("assignment") : "all";
+    $("#search-query").value = state.searchQuery;
+    $("#search-mode").value = state.searchMode;
+    $("#search-assignment").value = state.searchAssignment;
+    setTab(view);
+    const offset = Math.max(0, Number(route.get("offset")) || 0);
+    if (view === "conversation") {
+      const id = Number(route.get("id"));
+      if (!Number.isSafeInteger(id) || id <= 0) { showError(new Error("Invalid conversation link."), false); return; }
+      state.context = route.get("from") === "search" ? { q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment } : {};
+      state.matchIndex = 0;
+      $("#back-to-results span").textContent = route.get("from") === "search" ? "Search results" : "Conversations";
+      await loadConversation(id, Number(route.get("chunk")) || null);
+    } else {
+      state.conversationId = null;
+      if (view === "conversations") await loadConversations(offset);
+      else if (view === "search") await loadSearch(offset);
+      else await loadPeople();
+      if (state.view === view) window.scrollTo(0, history.state?.scrollY || 0);
+    }
+  }
+
+  window.voxvaultBack = () => {
+    if (state.busy) return true;
+    const dialogs = document.querySelectorAll("dialog[open]");
+    if (dialogs.length) {
+      const dialog = dialogs[dialogs.length - 1];
+      dialog.returnValue = "cancel";
+      dialog.close();
+      return true;
+    }
+    if (state.view !== "conversation") return false;
+    if (history.state?.archiveNavigation) history.back();
+    else navigate(new URLSearchParams(location.hash.slice(1)).get("from") === "search" ? "search" : "conversations");
+    return true;
+  };
+  window.addEventListener("popstate", renderRoute);
+  $("#conversations-tab").addEventListener("click", () => navigate("conversations"));
+  $("#search-tab").addEventListener("click", () => navigate("search"));
+  $("#people-tab").addEventListener("click", () => navigate("people"));
+  $("#refresh-conversations").addEventListener("click", () => loadConversations(state.conversationsOffset));
+  $("#back-to-results").addEventListener("click", window.voxvaultBack);
+  $("#previous-match").addEventListener("click", () => moveMatch(-1));
+  $("#next-match").addEventListener("click", () => moveMatch(1));
+  $("#close-speaker").addEventListener("click", () => $("#speaker-picker").close());
+  $("#speaker-picker").addEventListener("close", () => { ++epochs.speaker; });
+  $("#speaker-filter").addEventListener("input", renderSpeakerOptions);
+  $("#speaker-unassign").addEventListener("click", async () => {
+    if (await assignChunk(state.speakerChunk.id, null)) $("#speaker-picker").close();
+  });
+  $("#speaker-create-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const name = $("#speaker-new-name").value.trim();
+    if (!name || !state.speakerChunk) return;
+    const saved = await mutate(() => request("/persons", { method: "POST", body: JSON.stringify({ name, chunkId: state.speakerChunk.id }) }), `${name} created and assigned.`);
+    if (saved) $("#speaker-picker").close();
+  });
   $("#search-form").addEventListener("submit", event => {
     event.preventDefault();
     state.searchQuery = $("#search-query").value.trim();
     state.searchAssignment = $("#search-assignment").value;
-    loadSearch(0);
+    state.searchMode = $("#search-mode").value;
+    navigate("search");
   });
   $("#search-assignment").addEventListener("change", () => $("#search-form").requestSubmit());
+  $("#search-mode").addEventListener("change", () => $("#search-form").requestSubmit());
   $("#person-filter").addEventListener("input", renderPeople);
   $("#comparison-filter").addEventListener("input", renderComparison);
   $("#close-inspector").addEventListener("click", () => $("#inspector").close());
@@ -605,7 +876,7 @@
   $("#create-person-form").addEventListener("submit", event => {
     event.preventDefault();
     const name = $("#new-person-name").value.trim();
-    if (!name || !state.chunk?.hasVoiceEmbedding) return;
+    if (!name || !state.chunk) return;
     const chunkId = state.chunk.id;
     mutate(async () => {
       const result = await request("/persons", { method: "POST", body: JSON.stringify({ name, chunkId }) });
@@ -617,6 +888,6 @@
     }, `${name} created and assigned to chunk #${chunkId}.`);
   });
 
-  loadSearch();
+  renderRoute();
   loadPeople();
 })();

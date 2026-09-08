@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Conversation Explorer | VoxVault</title>
+    <title>Conversations | VoxVault</title>
     <link rel="stylesheet" href="/static/style.css?v=7" />
-    <link rel="stylesheet" href="/static/explorer.css?v=3" />
+    <link rel="stylesheet" href="/static/explorer.css?v=4" />
   </head>
   <body class="explorer">
     <main class="shell explorer-shell">
@@ -14,26 +14,54 @@
         <a href="/ui/">Setup <img src="/static/icons/arrow-right.svg" alt="" /></a>
       </header>
       <nav class="tabs" aria-label="Archive views">
-        <button id="search-tab" class="tab active" type="button" aria-pressed="true"><img src="/static/icons/search.svg" alt="" />Search</button>
+        <button id="conversations-tab" class="tab active" type="button" aria-pressed="true"><img src="/static/icons/audio-lines.svg" alt="" />Conversations</button>
+        <button id="search-tab" class="tab" type="button" aria-pressed="false"><img src="/static/icons/search.svg" alt="" />Search</button>
         <button id="people-tab" class="tab" type="button" aria-pressed="false"><img src="/static/icons/users.svg" alt="" />People <span id="people-count" class="count">0</span></button>
       </nav>
       <p id="page-error" class="notice error hidden" role="alert"></p>
       <p id="page-status" class="operation-status" role="status" aria-live="polite"></p>
-      <section id="search-view" aria-label="Search conversation chunks">
+      <section id="conversations-view" aria-label="Conversations">
+        <div class="results-heading"><h2 id="conversations-summary" role="status">Loading conversations...</h2><button id="refresh-conversations" class="icon-button secondary" type="button" title="Refresh conversations" aria-label="Refresh conversations"><img src="/static/icons/refresh-cw.svg" alt="" /></button></div>
+        <div id="conversations-results" class="conversation-list" aria-busy="true"></div>
+        <div id="conversations-pagination" class="pagination"></div>
+      </section>
+      <section id="search-view" class="hidden" aria-label="Search conversations">
         <form id="search-form" class="search-form">
           <div class="query-field"><label for="search-query">Conversation search</label><input id="search-query" name="q" type="search" placeholder="Search your conversations" autocomplete="off" maxlength="2000" /></div>
-          <div><label for="search-assignment">Association</label><select id="search-assignment"><option value="unassigned">Unassigned</option><option value="all">All chunks</option><option value="assigned">Assigned</option></select></div>
+          <div><label for="search-mode">Search by</label><select id="search-mode"><option value="semantic">Segment meaning</option><option value="conversation">Conversation theme</option><option value="text">Exact text</option></select></div>
+          <div><label for="search-assignment">Speaker</label><select id="search-assignment"><option value="all">All speakers</option><option value="unassigned">Unassigned</option><option value="assigned">Assigned</option></select></div>
           <button id="search-submit" type="submit"><img src="/static/icons/search.svg" alt="" />Search</button>
         </form>
-        <div class="results-heading"><h2 id="search-summary" role="status">Loading conversations...</h2><div class="confidence-legend" aria-label="Transcription confidence"><span>Word confidence</span><span class="confidence-high">90%+</span><span class="confidence-medium">60-89%</span><span class="confidence-low">Below 60%</span><span class="confidence-unknown">Unknown</span></div></div>
-        <div id="search-results" class="chunk-list" aria-busy="true"></div>
+        <div class="results-heading"><h2 id="search-summary" role="status">Conversations</h2></div>
+        <div id="search-results" class="conversation-list" aria-busy="false"></div>
         <div id="search-pagination" class="pagination"></div>
       </section>
       <section id="people-view" class="hidden" aria-label="People">
         <div class="results-heading"><h2>People</h2><div class="person-filter"><label for="person-filter">Filter names</label><input id="person-filter" type="search" placeholder="Person name" autocomplete="off" /></div></div>
         <div id="people-results" class="people-list"></div>
       </section>
+      <section id="conversation-view" class="hidden" aria-label="Full conversation">
+        <button id="back-to-results" type="button" class="secondary compact previous"><img src="/static/icons/arrow-right.svg" alt="" /><span>Conversations</span></button>
+        <div class="conversation-heading"><h2 id="conversation-title" tabindex="-1">Conversation</h2><p id="conversation-metadata" class="muted"></p></div>
+        <div id="match-navigation" class="match-navigation hidden" aria-label="Search matches">
+          <span id="match-summary" role="status"></span>
+          <button id="previous-match" type="button" class="icon-button secondary previous" title="Previous match" aria-label="Previous match"><img src="/static/icons/arrow-right.svg" alt="" /></button>
+          <button id="next-match" type="button" class="icon-button secondary" title="Next match" aria-label="Next match"><img src="/static/icons/arrow-right.svg" alt="" /></button>
+        </div>
+        <div id="conversation-chunks" class="dialogue" aria-busy="false"></div>
+      </section>
     </main>
+    <dialog id="speaker-picker" aria-labelledby="speaker-title">
+      <header class="inspector-heading"><h2 id="speaker-title">Assign speaker</h2><button id="close-speaker" type="button" class="icon-button secondary" title="Close speaker picker" aria-label="Close speaker picker"><img src="/static/icons/x.svg" alt="" /></button></header>
+      <div class="speaker-body">
+        <p id="speaker-error" class="notice error hidden" role="alert"></p><p id="speaker-status" class="operation-status" role="status"></p>
+        <p id="speaker-sample" class="muted"></p>
+        <label for="speaker-filter">Person</label><input id="speaker-filter" type="search" placeholder="Filter people" autocomplete="off" />
+        <div id="speaker-options" aria-busy="false"></div>
+        <button id="speaker-unassign" type="button" class="secondary compact"><img src="/static/icons/unlink.svg" alt="" />Unassign</button>
+        <form id="speaker-create-form" class="speaker-create"><label for="speaker-new-name">New person</label><input id="speaker-new-name" required maxlength="200" autocomplete="off" placeholder="Name" /><button type="submit"><img src="/static/icons/user-plus.svg" alt="" />Create &amp; assign</button></form>
+      </div>
+    </dialog>
     <dialog id="inspector" aria-labelledby="inspector-title">
       <header class="inspector-heading"><div><p class="eyebrow">Voice embedding</p><h2 id="inspector-title">Speaker inspection</h2></div><button id="close-inspector" class="icon-button secondary" type="button" title="Close inspector" aria-label="Close inspector"><img src="/static/icons/x.svg" alt="" /></button></header>
       <div class="inspector-body">
@@ -73,6 +101,6 @@
         <button class="danger" value="delete"><img src="/static/icons/trash-2.svg" alt="" />Delete chunk</button>
       </form>
     </dialog>
-    <script src="/static/explorer.js?v=3" defer></script>
+    <script src="/static/explorer.js?v=4" defer></script>
   </body>
 </html>

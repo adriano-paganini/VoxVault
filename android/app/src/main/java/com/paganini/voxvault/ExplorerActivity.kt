@@ -41,7 +41,9 @@ class ExplorerActivity : AppCompatActivity() {
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
-        findViewById<MaterialToolbar>(R.id.explorerToolbar).setNavigationOnClickListener { finish() }
+        findViewById<MaterialToolbar>(R.id.explorerToolbar).setNavigationOnClickListener {
+            onBackPressedDispatcher.onBackPressed()
+        }
         findViewById<View>(R.id.refreshArchive).setOnClickListener { loadArchive() }
         TooltipCompat.setTooltipText(findViewById(R.id.refreshArchive), getString(R.string.refresh))
         findViewById<View>(R.id.retryArchive).setOnClickListener { loadArchive() }
@@ -81,7 +83,8 @@ class ExplorerActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 webView.evaluateJavascript(
-                    "(function(){var dialogs=document.querySelectorAll('dialog[open]');" +
+                    "(function(){if(window.voxvaultBack)return window.voxvaultBack();" +
+                        "var dialogs=document.querySelectorAll('dialog[open]');" +
                         "if(!dialogs.length)return false;var dialog=dialogs[dialogs.length-1];" +
                         "dialog.returnValue='cancel';dialog.close();return true;})()"
                 ) { closed -> if (closed != "true") finish() }

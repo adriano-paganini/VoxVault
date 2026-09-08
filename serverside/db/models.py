@@ -39,6 +39,9 @@ class Recording(Base):
 
     language: Mapped[str | None] = mapped_column(Text)
 
+    text_embedding: Mapped[list[float] | None] = mapped_column(VECTOR(TEXT_EMBEDDING_DIM))
+    text_embedding_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     chunks: Mapped[list[TranscriptionChunk]] = relationship(
         back_populates="recording",
         cascade="all, delete-orphan",
@@ -92,11 +95,11 @@ class TranscriptionChunk(Base):
     )
 
     recording_id: Mapped[int] = mapped_column(
-        ForeignKey("recording.id")
+        ForeignKey("recording.id"), index=True,
     )
 
     person_id: Mapped[int | None] = mapped_column(
-        ForeignKey("person.id")
+        ForeignKey("person.id"), index=True,
     )
 
     chunk_index: Mapped[int] = mapped_column(Integer)
