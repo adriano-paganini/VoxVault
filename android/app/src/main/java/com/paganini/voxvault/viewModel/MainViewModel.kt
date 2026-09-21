@@ -12,10 +12,13 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.paganini.voxvault.SettingsManager
 import com.paganini.voxvault.dataClass.Recording
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import com.paganini.voxvault.service.HttpCommunicationService
+import com.paganini.voxvault.upload.UploadCleanupResult
+import com.paganini.voxvault.upload.UploadQueue
 import com.paganini.voxvault.service.ListeningService
 import com.paganini.voxvault.service.RecordingFileReaderService
+import java.io.File
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     
@@ -62,7 +65,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    var httpCommunicationService = HttpCommunicationService(application)
+    val uploadQueue = UploadQueue.get(application)
+    val uploadState = uploadQueue.state
+
+    private val _deletingUploaded = MutableLiveData(false)
+    val deletingUploaded: LiveData<Boolean> = _deletingUploaded
+    private val _uploadCleanupResult = MutableLiveData<UploadCleanupResult?>()
+    val uploadCleanupResult: LiveData<UploadCleanupResult?> = _uploadCleanupResult
+
+    fun deleteUploadedRecordings(names: Set<String>) {
+        if (_deletingUploaded.value == true) return
+        _deletingUploaded.value = true
+        viewModelScope.launch {
+            try {
+                _uploadCleanupResult.value = uploadQueue.deleteUploaded(
+                    File(getApplication<Application>().filesDir, "recordings"), names,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uploadCleanupResult.value = UploadCleanupResult(error = error.message ?: "Could not delete recordings")
+            } finally {
+                refreshRecordings()
+                _deletingUploaded.value = false
+            }
+        }
+    }
+
+    fun clearUploadCleanupResult() { _uploadCleanupResult.value = null }
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {

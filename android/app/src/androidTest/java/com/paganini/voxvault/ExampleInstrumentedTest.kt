@@ -17,6 +17,6 @@ class ExampleInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test.
         val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-        Assert.assertEquals("com.example.voxvault", appContext.packageName)
+        Assert.assertEquals("com.paganini.voxvault", appContext.packageName)
     }
 }

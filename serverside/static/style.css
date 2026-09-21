@@ -54,6 +54,18 @@ p {
   gap: 24px;
   align-items: center;
 }
+.brand-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.brand-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex: 0 0 56px;
+}
 #connection-status {
   font-size: 13px;
   color: #28704d;
@@ -353,6 +365,51 @@ progress {
   color: #647277;
   font-size: 14px;
 }
+.language-settings {
+  padding: 28px 0;
+  border-bottom: 1px solid #dce2e4;
+}
+.language-settings h2 {
+  font-size: 20px;
+}
+.language-settings details {
+  margin-top: 0;
+  border-top: 0;
+  padding: 0;
+}
+#language-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 4px 20px;
+  max-height: 270px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid #ced8dc;
+}
+#language-choices legend {
+  font-size: 14px;
+  padding: 0 8px;
+}
+#language-choices label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+#language-choices input {
+  accent-color: #176b87;
+  flex-shrink: 0;
+}
+.language-settings .actions {
+  align-items: center;
+  margin-top: 16px;
+}
+#languages-status {
+  font-size: 14px;
+}
 footer {
   min-height: 44px;
   padding-top: 16px;
@@ -382,6 +439,11 @@ footer {
   }
   .view-heading {
     display: block;
+  }
+  .brand-icon {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
   }
   #connection-status {
     display: block;

@@ -7,10 +7,16 @@
   const state = {
     people: [], person: null, chunk: null, known: [], knownChunkId: null,
     searchOffset: 0, knownOffset: 0, candidateOffset: 0,
-    searchQuery: "", searchMode: "semantic", searchAssignment: "all",
+    searchQuery: "", searchAssignment: "all",
+    view: "conversations", conversation: null, conversationId: null, conversationsOffset: 0,
+    context: {}, matchIndex: 0, speakerChunk: null, speakerPeople: [],
     source: "chunk", scope: "other", busy: false,
   };
-  const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0 };
+  const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0, conversations: 0, conversation: 0, speaker: 0 };
+  let pendingDeletion = null;
+  const transcriptEdits = new Map();
+  let renderedUrl = location.href;
+  if (new URLSearchParams(location.search).get("app") === "1") document.body.classList.add("in-app");
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -36,13 +42,14 @@
   }
 
   function showError(error, inInspector = $("#inspector").open) {
-    const target = $(inInspector ? "#inspector-error" : "#page-error");
+    const target = $($("#speaker-picker").open ? "#speaker-error" : inInspector ? "#inspector-error" : "#page-error");
     target.textContent = error.message || "The request failed. Please try again.";
     target.classList.remove("hidden");
   }
 
   function clearError(inInspector) {
     $(inInspector ? "#inspector-error" : "#page-error").classList.add("hidden");
+    $("#speaker-error").classList.add("hidden");
   }
 
   async function request(path, options = {}) {
@@ -99,35 +106,171 @@
     return element("span", `association ${candidate ? "candidate" : ""}`, candidate ? "Candidate / unassigned" : "Unassigned");
   }
 
-  function transcript(chunk) {
-    const paragraph = element("p", "transcript");
+  function draftChunk(chunk) {
+    const draft = transcriptEdits.get(chunk.id);
+    return draft ? { ...chunk, text: draft.text, words: draft.words, wordCount: draft.wordCount } : chunk;
+  }
+
+  function wordParts(chunk) {
+    const parts = [];
     const text = chunk.text || "";
-    if (!text) return element("p", "transcript muted", "No transcript available.");
     let cursor = 0;
-    let matched = false;
-    // Locate aligned words in the original transcript so punctuation and spacing survive.
+    const gap = (end) => {
+      for (const match of text.slice(cursor, end).matchAll(/\S+/gu)) {
+        parts.push({ word: match[0], start: cursor + match.index, end: cursor + match.index + match[0].length });
+      }
+    };
     for (const word of chunk.words || []) {
       const spoken = String(word.word || "").trim();
       if (!spoken) continue;
-      const position = text.indexOf(spoken, cursor);
-      if (position < 0) continue;
-      if (position > cursor) paragraph.append(document.createTextNode(text.slice(cursor, position)));
-      const confidence = finite(word.confidence) ? word.confidence : null;
-      const level = confidence === null ? "unknown" : confidence >= 0.9 ? "high" : confidence >= 0.6 ? "medium" : "low";
-      const wordNode = element("mark", `word confidence-${level}`, text.slice(position, position + spoken.length));
-      const description = confidence === null ? "Confidence unknown" : `${(confidence * 100).toFixed(1)}% transcription confidence`;
-      wordNode.title = `${spoken}: ${description}${finite(word.startMs) ? `; ${timecode(word.startMs)}` : ""}${word.speakerLabel ? `; speaker ${word.speakerLabel}` : ""}`;
-      wordNode.setAttribute("aria-label", `${spoken}, ${description}`);
+      const start = text.indexOf(spoken, cursor);
+      if (start < 0) continue;
+      gap(start);
+      parts.push({ ...word, word: spoken, start, end: start + spoken.length });
+      cursor = start + spoken.length;
+    }
+    gap(text.length);
+    return parts;
+  }
+
+  function transcript(chunk, { editable = false, confidence = true, query = "" } = {}) {
+    if (editable) chunk = draftChunk(chunk);
+    const paragraph = element("p", "transcript");
+    const text = chunk.text || "";
+    if (!text) return element("p", "transcript muted", "No transcript available.");
+    const parts = wordParts(chunk);
+    const matches = [];
+    if (query) {
+      let start = 0;
+      let index;
+      while ((index = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase(), start)) !== -1) {
+        matches.push([index, index + query.length]);
+        start = index + query.length;
+      }
+    }
+    const appendText = (node, start, end) => {
+      for (const [left, right] of matches) {
+        if (right <= start || left >= end) continue;
+        const from = Math.max(start, left), to = Math.min(end, right);
+        node.append(document.createTextNode(text.slice(start, from)), element("mark", "text-match", text.slice(from, to)));
+        start = to;
+      }
+      node.append(document.createTextNode(text.slice(start, end)));
+    };
+    let cursor = 0;
+    for (const word of parts) {
+      appendText(paragraph, cursor, word.start);
+      const certainty = finite(word.confidence) ? word.confidence : null;
+      const level = certainty === null ? "unknown" : certainty >= 0.9 ? "high" : certainty >= 0.6 ? "medium" : "low";
+      const wordNode = element("mark", `word${confidence ? ` confidence-${level}` : ""}${word.isEdited ? " word-edited" : ""}`);
+      appendText(wordNode, word.start, word.end);
+      const description = word.isEdited ? "Edited" : certainty === null ? "Confidence unknown" : `${(certainty * 100).toFixed(1)}% transcription confidence`;
+      wordNode.title = `${word.word}: ${description}${finite(word.startMs) ? `; ${timecode(word.startMs)}` : ""}${word.speakerLabel ? `; speaker ${word.speakerLabel}` : ""}`;
+      wordNode.setAttribute("aria-label", `${word.word}, ${description}`);
+      if (editable) {
+        wordNode.dataset.start = word.start;
+        wordNode.dataset.end = word.end;
+        wordNode.tabIndex = 0;
+        wordNode.setAttribute("role", "button");
+        wordNode.setAttribute("aria-pressed", "false");
+      }
       paragraph.append(wordNode);
-      cursor = position + spoken.length;
-      matched = true;
+      cursor = word.end;
     }
-    if (cursor < text.length) {
-      const remainder = element("span", matched ? "" : "word confidence-unknown", text.slice(cursor));
-      if (!matched) remainder.title = "Word confidence unavailable";
-      paragraph.append(remainder);
-    }
-    return paragraph;
+    appendText(paragraph, cursor, text.length);
+    if (!editable) return paragraph;
+
+    const editor = element("div", "transcript-editor");
+    editor.dataset.chunkId = chunk.id;
+    const form = element("form", "word-replacement hidden");
+    const label = element("label", "", "Replacement");
+    const input = element("input");
+    input.type = "text";
+    input.maxLength = 2000;
+    input.required = true;
+    input.setAttribute("aria-label", "Replacement words");
+    input.addEventListener("input", () => input.setCustomValidity(""));
+    label.append(input);
+    let selected = null;
+    const select = (start, end) => {
+      if (state.busy) return;
+      selected = { start, end };
+      for (const mark of paragraph.querySelectorAll("[data-start]")) {
+        const active = Number(mark.dataset.start) >= start && Number(mark.dataset.end) <= end;
+        mark.classList.toggle("word-selected", active);
+        mark.setAttribute("aria-pressed", String(active));
+      }
+      input.value = text.slice(start, end);
+      input.defaultValue = input.value;
+      form.classList.remove("hidden");
+    };
+    paragraph.addEventListener("click", event => {
+      const mark = event.target.closest("[data-start]");
+      const selection = window.getSelection();
+      if (!mark || !selection.isCollapsed) return;
+      const start = Number(mark.dataset.start), end = Number(mark.dataset.end);
+      select(event.shiftKey && selected ? Math.min(selected.start, start) : start,
+        event.shiftKey && selected ? Math.max(selected.end, end) : end);
+    });
+    paragraph.addEventListener("pointerup", () => {
+      const selection = window.getSelection();
+      if (!selection.rangeCount || selection.isCollapsed || !paragraph.contains(selection.anchorNode) || !paragraph.contains(selection.focusNode)) return;
+      const range = selection.getRangeAt(0);
+      const marks = [...paragraph.querySelectorAll("[data-start]")].filter(mark => range.intersectsNode(mark));
+      if (marks.length) select(Number(marks[0].dataset.start), Number(marks.at(-1).dataset.end));
+    });
+    paragraph.addEventListener("keydown", event => {
+      if (!["Enter", " "].includes(event.key) || !event.target.matches("[data-start]")) return;
+      event.preventDefault();
+      const mark = event.target;
+      const start = Number(mark.dataset.start), end = Number(mark.dataset.end);
+      select(event.shiftKey && selected ? Math.min(selected.start, start) : start,
+        event.shiftKey && selected ? Math.max(selected.end, end) : end);
+      input.focus();
+    });
+    const apply = () => {
+      if (!selected || form.classList.contains("hidden")) return true;
+      const replacement = input.value.trim();
+      if (!replacement) { input.setCustomValidity("Enter replacement words."); input.focus(); input.reportValidity(); return false; }
+      const { start, end } = selected;
+      if (text.slice(start, end) === replacement) { form.classList.add("hidden"); return true; }
+      const draft = transcriptEdits.get(chunk.id) || { originalText: text, replacements: [] };
+      const affected = parts.filter(word => word.end > start && word.start < end);
+      const timed = affected.filter(word => finite(word.startMs) && finite(word.endMs));
+      const words = replacement.match(/\S+/gu).map(word => ({
+        word, isEdited: true, confidence: null, speakerLabel: affected[0]?.speakerLabel,
+        startMs: timed.length ? Math.min(...timed.map(word => word.startMs)) : chunk.startMs,
+        endMs: timed.length ? Math.max(...timed.map(word => word.endMs)) : chunk.endMs,
+      }));
+      draft.text = text.slice(0, start) + replacement + text.slice(end);
+      draft.words = [...parts.filter(word => word.end <= start), ...words, ...parts.filter(word => word.start >= end)];
+      draft.wordCount = (draft.text.match(/\S+/gu) || []).length;
+      // API offsets count Unicode code points, while browser selections use UTF-16.
+      draft.replacements.push({ start: [...text.slice(0, start)].length, end: [...text.slice(0, end)].length, text: replacement });
+      transcriptEdits.set(chunk.id, draft);
+      for (const node of document.querySelectorAll(`.transcript-editor[data-chunk-id="${chunk.id}"]`)) {
+        node.replaceWith(transcript(chunk, { editable: true }));
+      }
+      $("#inspector-status").textContent = `${count(transcriptEdits.size, "edited chunk")} pending`;
+      $("#discard-transcripts").classList.remove("hidden");
+      return true;
+    };
+    editor.applyReplacement = apply;
+    form.addEventListener("submit", event => { event.preventDefault(); if (!state.busy) apply(); });
+    const replace = button("", "check", () => {}, "icon-button");
+    replace.type = "submit";
+    replace.title = "Replace selected words";
+    replace.setAttribute("aria-label", replace.title);
+    const cancel = button("", "x", () => {
+      selected = null;
+      form.classList.add("hidden");
+      paragraph.querySelectorAll(".word-selected").forEach(mark => { mark.classList.remove("word-selected"); mark.setAttribute("aria-pressed", "false"); });
+    }, "icon-button secondary");
+    cancel.title = "Cancel word replacement";
+    cancel.setAttribute("aria-label", cancel.title);
+    form.append(label, replace, cancel);
+    editor.append(paragraph, form);
+    return editor;
   }
 
   function metadata(chunk) {
@@ -150,6 +293,7 @@
   }
 
   function chunkContent(chunk, { candidate = false, inspect = true, search = false, framed = true } = {}) {
+    chunk = draftChunk(chunk);
     const card = element("article", framed ? "chunk-card" : "chunk-content");
     card.dataset.chunkId = chunk.id;
     const top = element("div", "chunk-top");
@@ -157,15 +301,18 @@
     identity.append(element("span", "chunk-id", `Chunk #${chunk.id}`), element("span", "", timestamp(chunk.recordingTimestamp)), association(chunk, candidate));
     top.append(identity);
     if (finite(chunk.similarity)) top.append(score(chunk.similarity, search ? "Text cosine similarity" : "Voice cosine similarity"));
-    card.append(top, transcript(chunk));
+    card.append(top, transcript(chunk, { editable: true }));
     const bottom = element("div", "chunk-bottom");
     bottom.append(metadata(chunk));
     const actions = element("div", "inline-actions");
     if (inspect) {
-      const inspectButton = button("Inspect Voice Embedding", "audio-lines", () => inspectChunk(chunk.id, { retainPerson: $("#inspector").open }));
-      inspectButton.disabled = !chunk.hasVoiceEmbedding;
-      if (!chunk.hasVoiceEmbedding) inspectButton.title = "No voice embedding is available for this chunk";
+      const inspectButton = button("Inspect voice", "audio-lines", () => inspectChunk(chunk.id, { retainPerson: $("#inspector").open }));
+      inspectButton.disabled = state.busy;
       actions.append(inspectButton);
+      actions.append(button("Full conversation", "arrow-right", async () => {
+        if (!await closeInspector()) return;
+        navigate("conversation", { id: chunk.recordingId, chunk: chunk.id, from: state.view });
+      }));
     }
     if (candidate && state.person) {
       if (chunk.personId === state.person.id) {
@@ -176,11 +323,17 @@
       } else {
         const assignment = button(chunk.personId == null ? "Assign" : "Reassign", "check", () => assignChunk(chunk.id, state.person.id), "compact");
         assignment.dataset.mutation = "";
-        assignment.disabled = state.busy || !chunk.hasVoiceEmbedding;
+        assignment.disabled = state.busy;
         assignment.title = chunk.personId == null ? `Assign to ${personName(state.person)}` : `Move from ${ownerName(chunk)} to ${personName(state.person)}`;
         actions.append(assignment);
       }
     }
+    const remove = button("", "trash-2", () => confirmDeletion(chunk), "icon-button secondary danger-icon");
+    remove.title = `Delete chunk #${chunk.id}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.dataset.mutation = "";
+    remove.disabled = state.busy;
+    actions.append(remove);
     bottom.append(actions);
     card.append(bottom);
     return card;
@@ -209,14 +362,14 @@
     $("#search-summary").textContent = "Searching conversations...";
     $("#search-submit").disabled = true;
     try {
-      const params = new URLSearchParams({ q: state.searchQuery, mode: state.searchMode, assignment: state.searchAssignment, offset, limit: pageSize });
-      const page = await request(`/chunks?${params}`);
+      const params = new URLSearchParams({ q: state.searchQuery, assignment: state.searchAssignment, offset, limit: pageSize });
+      const page = await request(`/conversations?${params}`);
       if (version !== epochs.search) return;
       if (page.total && offset >= page.total) return await loadSearch(Math.floor((page.total - 1) / pageSize) * pageSize);
-      $("#search-summary").textContent = `${count(page.total, "chunk")}${state.searchQuery ? " found" : " in your archive"}`;
-      $("#search-results").replaceChildren(...page.items.map(chunk => chunkContent(chunk, { search: true })));
-      if (!page.items.length) $("#search-results").append(element("p", "empty-state", state.searchQuery ? "No matching conversation chunks." : "No conversation chunks found."));
-      renderPagination("#search-pagination", page, loadSearch);
+      $("#search-summary").textContent = `${count(page.total, "conversation")}${state.searchQuery ? " found" : " in your archive"}`;
+      $("#search-results").replaceChildren(...page.items.map(item => conversationRow(item, true)));
+      if (!page.items.length) $("#search-results").append(element("p", "empty-state", "No matching conversations."));
+      renderPagination("#search-pagination", page, offset => navigate("search", { offset }));
     } catch (error) {
       if (version !== epochs.search) return;
       $("#search-summary").textContent = "Conversation search unavailable";
@@ -229,6 +382,197 @@
         $("#search-submit").disabled = false;
       }
     }
+  }
+
+  function conversationRow(item, searched = false) {
+    const row = button("", null, () => navigate("conversation", {
+      id: item.id, from: searched ? "search" : "conversations",
+    }), "conversation-row");
+    row.dataset.recordingId = item.id;
+    const content = element("span", "conversation-description");
+    content.append(element("strong", "", `Conversation - ${timestamp(item.timestamp)}`));
+    content.append(element("span", "muted", `${count(item.chunkCount, "segment")} / ${count(item.wordCount, "word")} / ${timecode(item.durationMs)}${item.language ? ` / ${item.language}` : ""}`));
+    content.append(element("span", "conversation-preview", item.preview || "No transcript available."));
+    if (searched && state.searchQuery) {
+      content.append(element("span", "match-count", count(item.matchedChunkIds.length, "matching segment")));
+      if (finite(item.similarity)) content.append(score(item.similarity, "Text cosine similarity"));
+    }
+    row.append(content, icon("arrow-right"));
+    return row;
+  }
+
+  async function loadConversations(offset = 0) {
+    const version = ++epochs.conversations;
+    state.conversationsOffset = offset;
+    $("#conversations-results").setAttribute("aria-busy", "true");
+    $("#conversations-summary").textContent = "Loading conversations...";
+    clearError(false);
+    try {
+      const page = await request(`/conversations?limit=${pageSize}&offset=${offset}`);
+      if (version !== epochs.conversations) return;
+      if (page.total && offset >= page.total) return await loadConversations(Math.floor((page.total - 1) / pageSize) * pageSize);
+      $("#conversations-summary").textContent = count(page.total, "conversation");
+      $("#conversations-results").replaceChildren(...page.items.map(item => conversationRow(item)));
+      if (!page.items.length) $("#conversations-results").append(element("p", "empty-state", "No conversations yet."));
+      renderPagination("#conversations-pagination", page, offset => navigate("conversations", { offset }));
+    } catch (error) {
+      if (version !== epochs.conversations) return;
+      $("#conversations-summary").textContent = "Conversations unavailable";
+      $("#conversations-results").replaceChildren();
+      $("#conversations-pagination").replaceChildren();
+      showError(error, false);
+    } finally {
+      if (version === epochs.conversations) $("#conversations-results").setAttribute("aria-busy", "false");
+    }
+  }
+
+  function dialogueChunk(chunk) {
+    const primary = chunk.matchType === "keyword";
+    const node = element("article", `dialogue-segment${chunk.matched ? ` matched ${primary ? "primary-match" : "secondary-match"}` : ""}`);
+    node.id = `segment-${chunk.id}`;
+    node.dataset.chunkId = chunk.id;
+    node.tabIndex = -1;
+    const top = element("div", "dialogue-speaker");
+    const speaker = button(chunk.personId == null ? "Assign speaker" : ownerName(chunk), "users", () => openSpeakerPicker(chunk), "secondary compact speaker-badge");
+    speaker.dataset.mutation = "";
+    speaker.disabled = state.busy;
+    top.append(speaker, element("span", "muted", `${timecode(chunk.startMs)} - ${timecode(chunk.endMs)}`));
+    if (chunk.matched) top.append(element("span", `match-count ${primary ? "primary-match" : "secondary-match"}`, primary ? "Keyword match" : "Related match"));
+    const body = transcript(chunk, { confidence: false, query: primary ? state.context.q : "" });
+    const actions = element("div", "inline-actions");
+    const inspect = button("", "audio-lines", () => inspectChunk(chunk.id), "icon-button secondary");
+    inspect.title = "Inspect voice";
+    inspect.setAttribute("aria-label", inspect.title);
+    inspect.dataset.mutation = "";
+    inspect.disabled = state.busy;
+    const remove = button("", "trash-2", () => confirmDeletion(chunk), "icon-button secondary danger-icon");
+    remove.title = `Delete chunk #${chunk.id}`;
+    remove.setAttribute("aria-label", remove.title);
+    remove.dataset.mutation = "";
+    remove.disabled = state.busy;
+    actions.append(inspect, remove);
+    top.append(actions);
+    node.append(top, body);
+    return node;
+  }
+
+  async function loadConversation(id, focusId = null, scroll = true) {
+    const version = ++epochs.conversation;
+    state.conversationId = id;
+    $("#conversation-chunks").setAttribute("aria-busy", "true");
+    if (scroll) {
+      state.conversation = null;
+      $("#conversation-title").textContent = "Loading conversation...";
+      $("#conversation-metadata").textContent = "";
+      $("#conversation-chunks").replaceChildren();
+      $("#match-navigation").classList.add("hidden");
+    }
+    try {
+      const conversation = await request(`/conversations/${id}?${new URLSearchParams(state.context)}`);
+      if (version !== epochs.conversation || state.view !== "conversation") return;
+      state.conversation = conversation;
+      $("#conversation-title").textContent = `Conversation - ${timestamp(conversation.timestamp)}`;
+      $("#conversation-metadata").textContent = `${count(conversation.chunkCount, "segment")} / ${count(conversation.wordCount, "word")} / ${timecode(conversation.durationMs)} / ${count(conversation.personCount, "identified speaker")}`;
+      $("#conversation-chunks").replaceChildren(...conversation.chunks.map(dialogueChunk));
+      if (!conversation.chunks.length) $("#conversation-chunks").append(element("p", "empty-state", "This conversation has no remaining transcript segments."));
+      state.matchIndex = Math.max(0, Math.min(state.matchIndex, conversation.matchedChunkIds.length - 1));
+      renderMatches();
+      if (scroll) {
+        const primaryId = conversation.chunks.find(chunk => chunk.matchType === "keyword")?.id;
+        const targetId = focusId || primaryId || conversation.matchedChunkIds[0];
+        state.matchIndex = Math.max(0, conversation.matchedChunkIds.indexOf(targetId));
+        renderMatches();
+        const target = targetId && $(`#segment-${targetId}`);
+        if (target) {
+          target.focus({ preventScroll: true });
+          target.scrollIntoView({ block: "start" });
+        } else {
+          $("#conversation-title").focus({ preventScroll: true });
+          window.scrollTo(0, 0);
+        }
+      }
+    } catch (error) {
+      if (version !== epochs.conversation) return;
+      $("#conversation-title").textContent = "Conversation unavailable";
+      showError(error, false);
+    } finally {
+      if (version === epochs.conversation) $("#conversation-chunks").setAttribute("aria-busy", "false");
+    }
+  }
+
+  function renderMatches() {
+    const ids = state.conversation?.matchedChunkIds || [];
+    $("#match-navigation").classList.toggle("hidden", !state.context.q);
+    $("#match-summary").textContent = ids.length ? `Match ${state.matchIndex + 1} of ${ids.length} for "${state.context.q}"` : `No matching segments for "${state.context.q}"`;
+    $("#match-summary").title = $("#match-summary").textContent;
+    $("#previous-match").disabled = !ids.length || state.matchIndex === 0;
+    $("#next-match").disabled = !ids.length || state.matchIndex === ids.length - 1;
+  }
+
+  function moveMatch(direction) {
+    const ids = state.conversation?.matchedChunkIds || [];
+    state.matchIndex = Math.max(0, Math.min(ids.length - 1, state.matchIndex + direction));
+    const target = $(`#segment-${ids[state.matchIndex]}`);
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "start" });
+    renderMatches();
+  }
+
+  async function openSpeakerPicker(chunk) {
+    if (state.busy) return;
+    state.speakerChunk = chunk;
+    state.speakerPeople = [];
+    clearError(false);
+    $("#speaker-filter").value = "";
+    $("#speaker-new-name").value = "";
+    $("#speaker-title").textContent = `Speaker / ${timecode(chunk.startMs)}`;
+    $("#speaker-sample").textContent = chunk.personId == null ? "Unassigned" : ownerName(chunk);
+    $("#speaker-status").textContent = "Loading people...";
+    $("#speaker-options").replaceChildren();
+    $("#speaker-pagination").replaceChildren();
+    $("#speaker-unassign").classList.toggle("hidden", chunk.personId == null);
+    $("#speaker-picker").showModal();
+    await loadSpeakerOptions();
+  }
+
+  async function loadSpeakerOptions(offset = 0) {
+    const version = ++epochs.speaker;
+    const chunk = state.speakerChunk;
+    $("#speaker-options").setAttribute("aria-busy", "true");
+    $("#speaker-options").replaceChildren();
+    $("#speaker-pagination").replaceChildren();
+    $("#speaker-status").textContent = "Loading people...";
+    $("#speaker-error").classList.add("hidden");
+    try {
+      const params = new URLSearchParams({ chunk_id: chunk.id, q: $("#speaker-filter").value.trim(), limit: pageSize, offset });
+      const result = await request(`/persons?${params}`);
+      if (version !== epochs.speaker) return;
+      state.speakerPeople = result.items;
+      $("#speaker-status").textContent = chunk.hasVoiceEmbedding ? "Voice similarity / highest first" : "No voice comparison available";
+      renderSpeakerOptions();
+      $("#speaker-options").scrollTop = 0;
+      renderPagination("#speaker-pagination", result, loadSpeakerOptions);
+    } catch (error) {
+      if (version === epochs.speaker) { $("#speaker-status").textContent = ""; showError(error); }
+    } finally {
+      if (version === epochs.speaker) $("#speaker-options").setAttribute("aria-busy", "false");
+    }
+  }
+
+  function renderSpeakerOptions() {
+    const people = state.speakerPeople;
+    $("#speaker-options").replaceChildren(...people.map(person => {
+      const row = button("", null, async () => {
+        const saved = await assignChunk(state.speakerChunk.id, person.id);
+        if (saved) $("#speaker-picker").close();
+      }, "comparison-person");
+      row.dataset.personId = person.id;
+      row.disabled = state.busy || person.id === state.speakerChunk.personId;
+      row.append(element("strong", "", personName(person)), score(person.similarity));
+      if (person.id === state.speakerChunk.personId) row.append(icon("check"));
+      return row;
+    }));
+    if (!people.length) $("#speaker-options").append(element("p", "empty-state", "No matching people."));
   }
 
   function renderPeople() {
@@ -285,9 +629,9 @@
       $("#selected-chunk-title").textContent = `Selected chunk #${state.chunk.id}`;
       $("#selected-chunk").append(chunkContent({ ...state.chunk, similarity: null }, { inspect: false, framed: false }));
     }
-    $("#create-person-button").disabled = state.busy || !state.chunk?.hasVoiceEmbedding;
-    $("#new-person-name").disabled = !state.chunk?.hasVoiceEmbedding;
-    $("#create-person-unavailable").classList.toggle("hidden", !!state.chunk?.hasVoiceEmbedding);
+    $("#create-person-button").disabled = state.busy || !state.chunk;
+    $("#new-person-name").disabled = !state.chunk;
+    $("#create-person-unavailable").classList.toggle("hidden", !!state.chunk);
     updateSourceControls();
   }
 
@@ -304,7 +648,7 @@
       const confirmed = chunk.personId === person.id;
       $("#assignment-summary").textContent = confirmed ? `Chunk #${chunk.id} is confirmed for ${personName(person)}.` : chunk.personId == null ? `Chunk #${chunk.id} is unassigned.` : `Chunk #${chunk.id} is currently assigned to ${ownerName(chunk)}. Reassignment moves it to ${personName(person)}.`;
       $("#assign-selected span").textContent = confirmed ? "Confirmed association" : chunk.personId == null ? `Assign to ${personName(person)}` : `Reassign to ${personName(person)}`;
-      $("#assign-selected").disabled = state.busy || confirmed || !chunk.hasVoiceEmbedding;
+      $("#assign-selected").disabled = state.busy || confirmed;
       $("#unassign-selected").classList.toggle("hidden", chunk.personId == null);
       $("#unassign-selected").disabled = state.busy;
     }
@@ -351,8 +695,35 @@
     if (!$("#inspector").open) $("#inspector").showModal();
   }
 
+  function applyPendingReplacements() {
+    for (const editor of document.querySelectorAll(".transcript-editor")) {
+      if (editor.isConnected && !editor.applyReplacement()) return false;
+    }
+    return true;
+  }
+
+  async function closeInspector() {
+    if (state.busy || !applyPendingReplacements()) return false;
+    if (transcriptEdits.size) {
+      const saved = await mutate(async () => {
+        $("#inspector-status").textContent = "Saving transcripts and updating text embeddings...";
+        await request("/transcripts", {
+          method: "PUT",
+          body: JSON.stringify({ chunks: [...transcriptEdits].map(([chunkId, draft]) => ({
+            chunkId, originalText: draft.originalText, replacements: draft.replacements,
+          })) }),
+        });
+        transcriptEdits.clear();
+        $("#discard-transcripts").classList.add("hidden");
+      }, "Transcripts saved. Text embeddings updated.");
+      if (!saved) return false;
+    }
+    $("#inspector").close();
+    return true;
+  }
+
   async function inspectChunk(id, { retainPerson = false } = {}) {
-    if (state.busy) return;
+    if (state.busy || !applyPendingReplacements()) return;
     const version = ++epochs.chunk;
     openInspector();
     $("#inspector-status").textContent = "Loading voice sample...";
@@ -461,71 +832,199 @@
     await loadPeople();
     renderSelectedChunk();
     renderProfile();
-    await loadKnown(state.knownOffset);
-    await loadCandidates(state.candidateOffset);
-    await loadSearch(state.searchOffset);
+    if ($("#inspector").open) {
+      await loadKnown(state.knownOffset);
+      await loadCandidates(state.candidateOffset);
+    }
+    if (state.view === "search") await loadSearch(state.searchOffset);
+    if (state.view === "conversations") await loadConversations(state.conversationsOffset);
+    if (state.view === "conversation" && state.conversationId) await loadConversation(state.conversationId, null, false);
   }
 
   async function mutate(callback, message) {
-    if (state.busy) return;
+    if (state.busy || !applyPendingReplacements()) return;
     state.busy = true;
-    clearError(true);
-    $("#inspector-status").textContent = "Saving changes...";
-    $("#inspector").querySelectorAll("button, input, select").forEach(node => {
-      if (node.id !== "close-inspector") {
-        node.dataset.preMutationDisabled = String(node.disabled);
-        node.disabled = true;
-      }
+    const inInspector = $("#inspector").open;
+    const status = $($("#speaker-picker").open ? "#speaker-status" : inInspector ? "#inspector-status" : "#page-status");
+    for (const key of Object.keys(epochs)) ++epochs[key];
+    clearError(inInspector);
+    status.textContent = "Saving changes...";
+    document.querySelectorAll("button, input, select").forEach(node => {
+      node.dataset.preMutationDisabled = String(node.disabled);
+      node.disabled = true;
     });
     let saved = false;
     try {
       await callback();
       saved = true;
       await refreshAfterMutation();
-      $("#inspector-status").textContent = message;
+      status.textContent = message;
     } catch (error) {
-      $("#inspector-status").textContent = saved ? "Changes saved. Some archive data could not be refreshed." : "";
-      showError(error, true);
+      status.textContent = saved ? "Changes saved. Some archive data could not be refreshed." : "";
+      showError(error, inInspector);
     } finally {
       state.busy = false;
-      $("#inspector").querySelectorAll("[data-pre-mutation-disabled]").forEach(node => {
+      document.querySelectorAll("[data-pre-mutation-disabled]").forEach(node => {
         node.disabled = node.dataset.preMutationDisabled === "true";
         delete node.dataset.preMutationDisabled;
       });
       renderSelectedChunk();
       renderProfile();
       renderComparison();
-      $("#candidate-results").querySelectorAll("[data-mutation]").forEach(node => { node.disabled = false; });
+      document.querySelectorAll(".chunk-list [data-mutation], #known-chunk [data-mutation], .dialogue [data-mutation]").forEach(node => {
+        node.disabled = node.dataset.unavailable === "true";
+      });
+      $("#search-submit").disabled = false;
     }
+    return saved;
   }
 
+  function confirmDeletion(chunk) {
+    if (state.busy) return;
+    pendingDeletion = chunk.id;
+    $("#delete-title").textContent = `Delete chunk #${chunk.id}?`;
+    $("#delete-description").textContent = "This permanently removes the transcript, word timings, and embeddings for this chunk. Any assigned person's voice profile will be recalculated from their remaining chunks.";
+    $("#delete-confirmation").returnValue = "cancel";
+    $("#delete-confirmation").showModal();
+  }
+
+  $("#delete-confirmation").addEventListener("close", () => {
+    const id = pendingDeletion;
+    pendingDeletion = null;
+    if ($("#delete-confirmation").returnValue !== "delete" || id == null) return;
+    mutate(async () => {
+      await request(`/chunks/${id}`, { method: "DELETE" });
+      transcriptEdits.delete(id);
+      if (state.chunk?.id === id) {
+        state.chunk = null;
+        state.source = "person";
+      }
+      if (state.knownChunkId === id) state.knownChunkId = null;
+      document.querySelectorAll(`[data-chunk-id="${id}"]`).forEach(node => node.remove());
+    }, `Chunk #${id} deleted.`);
+  });
+
   function assignChunk(chunkId, personId) {
-    const name = state.people.find(person => person.id === personId);
+    const name = [...state.people, ...state.speakerPeople].find(person => person.id === personId);
     return mutate(() => request(`/chunks/${chunkId}/person`, { method: "PUT", body: JSON.stringify({ personId }) }), personId == null ? `Chunk #${chunkId} is now unassigned.` : `Chunk #${chunkId} assigned to ${personName(name)}. Voice profile updated.`);
   }
 
   function setTab(tab) {
-    for (const name of ["search", "people"]) {
+    state.view = tab;
+    for (const name of ["conversations", "search", "people"]) {
       $(`#${name}-view`).classList.toggle("hidden", name !== tab);
       $(`#${name}-tab`).classList.toggle("active", name === tab);
       $(`#${name}-tab`).setAttribute("aria-pressed", String(name === tab));
     }
+    $("#conversation-view").classList.toggle("hidden", tab !== "conversation");
   }
 
-  $("#search-tab").addEventListener("click", () => setTab("search"));
-  $("#people-tab").addEventListener("click", () => setTab("people"));
+  function navigate(view, extra = {}) {
+    if (state.busy) return;
+    history.replaceState({ ...history.state, scrollY: window.scrollY }, "");
+    const route = new URLSearchParams({ view, q: state.searchQuery, assignment: state.searchAssignment, ...extra });
+    history.pushState({ archiveNavigation: true }, "", `#${route}`);
+    renderRoute();
+  }
+
+  async function renderRoute() {
+    if ($("#inspector").open && !await closeInspector()) {
+      history.replaceState(history.state, "", renderedUrl);
+      return;
+    }
+    renderedUrl = location.href;
+    const route = new URLSearchParams(location.hash.slice(1));
+    const view = ["search", "people", "conversation"].includes(route.get("view")) ? route.get("view") : "conversations";
+    ++epochs.conversation;
+    ++epochs.speaker;
+    ++epochs.search;
+    ++epochs.conversations;
+    document.querySelectorAll("dialog[open]").forEach(dialog => { dialog.returnValue = "cancel"; dialog.close(); });
+    clearError(false);
+    $("#page-status").textContent = "";
+    state.searchQuery = (route.get("q") || "").slice(0, 2000);
+    state.searchAssignment = ["assigned", "unassigned"].includes(route.get("assignment")) ? route.get("assignment") : "all";
+    $("#search-query").value = state.searchQuery;
+    $("#search-assignment").value = state.searchAssignment;
+    setTab(view);
+    const offset = Math.max(0, Number(route.get("offset")) || 0);
+    if (view === "conversation") {
+      const id = Number(route.get("id"));
+      if (!Number.isSafeInteger(id) || id <= 0) { showError(new Error("Invalid conversation link."), false); return; }
+      state.context = route.get("from") === "search" ? { q: state.searchQuery, assignment: state.searchAssignment } : {};
+      state.matchIndex = 0;
+      $("#back-to-results span").textContent = route.get("from") === "search" ? "Search results" : "Conversations";
+      await loadConversation(id, Number(route.get("chunk")) || null);
+    } else {
+      state.conversationId = null;
+      if (view === "conversations") await loadConversations(offset);
+      else if (view === "search") await loadSearch(offset);
+      else await loadPeople();
+      if (state.view === view) window.scrollTo(0, history.state?.scrollY || 0);
+    }
+  }
+
+  window.voxvaultBack = () => {
+    if (state.busy) return true;
+    const dialogs = document.querySelectorAll("dialog[open]");
+    if (dialogs.length) {
+      const dialog = dialogs[dialogs.length - 1];
+      if (dialog.id === "inspector") { closeInspector(); return true; }
+      dialog.returnValue = "cancel";
+      dialog.close();
+      return true;
+    }
+    if (state.view !== "conversation") return false;
+    if (history.state?.archiveNavigation) history.back();
+    else navigate(new URLSearchParams(location.hash.slice(1)).get("from") === "search" ? "search" : "conversations");
+    return true;
+  };
+  window.addEventListener("popstate", renderRoute);
+  window.addEventListener("beforeunload", event => {
+    const pending = [...document.querySelectorAll(".word-replacement:not(.hidden) input")].some(input => input.value !== input.defaultValue);
+    if (transcriptEdits.size || pending) { event.preventDefault(); event.returnValue = ""; }
+  });
+  $("#conversations-tab").addEventListener("click", () => navigate("conversations"));
+  $("#search-tab").addEventListener("click", () => navigate("search"));
+  $("#people-tab").addEventListener("click", () => navigate("people"));
+  $("#refresh-conversations").addEventListener("click", () => loadConversations(state.conversationsOffset));
+  $("#back-to-results").addEventListener("click", window.voxvaultBack);
+  $("#previous-match").addEventListener("click", () => moveMatch(-1));
+  $("#next-match").addEventListener("click", () => moveMatch(1));
+  $("#close-speaker").addEventListener("click", () => $("#speaker-picker").close());
+  $("#speaker-picker").addEventListener("close", () => { ++epochs.speaker; });
+  $("#speaker-filter").addEventListener("input", () => loadSpeakerOptions());
+  $("#speaker-unassign").addEventListener("click", async () => {
+    if (await assignChunk(state.speakerChunk.id, null)) $("#speaker-picker").close();
+  });
+  $("#speaker-create-form").addEventListener("submit", async event => {
+    event.preventDefault();
+    const name = $("#speaker-new-name").value.trim();
+    if (!name || !state.speakerChunk) return;
+    const saved = await mutate(() => request("/persons", { method: "POST", body: JSON.stringify({ name, chunkId: state.speakerChunk.id }) }), `${name} created and assigned.`);
+    if (saved) $("#speaker-picker").close();
+  });
   $("#search-form").addEventListener("submit", event => {
     event.preventDefault();
     state.searchQuery = $("#search-query").value.trim();
-    state.searchMode = $("#search-mode").value;
     state.searchAssignment = $("#search-assignment").value;
-    loadSearch(0);
+    navigate("search");
   });
   $("#search-assignment").addEventListener("change", () => $("#search-form").requestSubmit());
-  $("#search-mode").addEventListener("change", () => $("#search-form").requestSubmit());
   $("#person-filter").addEventListener("input", renderPeople);
   $("#comparison-filter").addEventListener("input", renderComparison);
-  $("#close-inspector").addEventListener("click", () => $("#inspector").close());
+  $("#close-inspector").addEventListener("click", closeInspector);
+  $("#discard-transcripts").addEventListener("click", () => {
+    if (state.busy) return;
+    transcriptEdits.clear();
+    $("#discard-transcripts").classList.add("hidden");
+    clearError(true);
+    $("#inspector-status").textContent = "Transcript corrections discarded.";
+    renderSelectedChunk();
+    renderKnownChunk();
+    loadCandidates(state.candidateOffset);
+  });
+  $("#inspector").addEventListener("cancel", event => { event.preventDefault(); closeInspector(); });
   $("#inspector").addEventListener("close", () => {
     if (!state.busy) {
       for (const key of ["chunk", "person", "known", "candidates"]) ++epochs[key];
@@ -568,7 +1067,7 @@
   $("#create-person-form").addEventListener("submit", event => {
     event.preventDefault();
     const name = $("#new-person-name").value.trim();
-    if (!name || !state.chunk?.hasVoiceEmbedding) return;
+    if (!name || !state.chunk) return;
     const chunkId = state.chunk.id;
     mutate(async () => {
       const result = await request("/persons", { method: "POST", body: JSON.stringify({ name, chunkId }) });
@@ -580,6 +1079,6 @@
     }, `${name} created and assigned to chunk #${chunkId}.`);
   });
 
-  loadSearch();
+  renderRoute();
   loadPeople();
 })();

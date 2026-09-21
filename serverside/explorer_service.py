@@ -1,16 +1,22 @@
 """Conversation discovery and confirmed speaker associations."""
 
-import logging
 import math
+import logging
+import re
+from functools import lru_cache
 
-from sqlalchemy import and_, case, func, literal, or_, select
+from sqlalchemy import and_, case, func, literal, literal_column, or_, select, text
 from sqlalchemy.orm import joinedload, selectinload
 
 from db.database import SessionLocal
-from db.models import Person, Recording, TEXT_EMBEDDING_DIM, TranscriptionChunk, VOICE_EMBEDDING_DIM
+from db.models import Person, Recording, TranscriptionChunk, TranscriptionWord, TEXT_EMBEDDING_DIM, VOICE_EMBEDDING_DIM
 
 
 logger = logging.getLogger(__name__)
+MIN_TEXT_SIMILARITY = 0.80
+MIN_SEARCH_WORDS = 3
+KEYWORD_BONUS = 0.5
+SEARCH_CANDIDATES = 200
 
 
 class ExplorerError(ValueError):
@@ -62,9 +68,39 @@ def weighted_voice_embedding(chunks):
 
 
 def _similarity(column, reference):
-    distance = column.cosine_distance(reference)
+    distance = column.cosine_distance(list(reference))
     valid = and_(distance >= -1e-6, distance <= 2.000001)
     return case((valid, 1.0 - distance), else_=None)
+
+
+def _nearest_query(model, column, reference, conditions=()):
+    distance = column.cosine_distance(list(reference))
+    # HNSW requires the raw distance operator in ascending ORDER BY, before
+    # grouping, score conversion, thresholds, or metadata joins.
+    return select(model.id, distance.label("distance")).where(
+        column.is_not(None), *conditions,
+    ).order_by(distance).limit(SEARCH_CANDIDATES)
+
+
+def _nearest_ids(session, model, column, reference, conditions=(), min_similarity=-1):
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(text("SELECT set_config('hnsw.ef_search', :value, true)"),
+                        {"value": str(SEARCH_CANDIDATES)})
+    return [id for id, distance in session.execute(_nearest_query(model, column, reference, conditions))
+            if distance is not None and math.isfinite(distance)
+            and -1e-6 <= distance <= 2.000001 and 1 - distance >= min_similarity - 1e-6]
+
+
+def _search_metadata(approximate=False):
+    return {"approximate": approximate, "candidateLimit": SEARCH_CANDIDATES if approximate else None}
+
+
+def _assignment_conditions(assignment):
+    if assignment == "assigned":
+        return [TranscriptionChunk.person_id.is_not(None)]
+    if assignment == "unassigned":
+        return [TranscriptionChunk.person_id.is_(None)]
+    return []
 
 
 def _score(value):
@@ -79,7 +115,7 @@ def _confidence(value):
     return max(0.0, min(1.0, float(value)))
 
 
-def _chunk_dict(chunk, similarity=None):
+def _chunk_dict(chunk, similarity=None, match_score=None, keyword_match=None):
     return {
         "id": chunk.id,
         "recordingId": chunk.recording_id,
@@ -101,14 +137,18 @@ def _chunk_dict(chunk, similarity=None):
                 "endMs": word.end_ms,
                 "confidence": _confidence(word.confidence),
                 "speakerLabel": word.raw_speaker_label,
+                "isEdited": word.is_edited,
             }
             for word in sorted(chunk.words, key=lambda item: item.word_index)
         ],
         "similarity": _score(similarity),
+        "matchScore": match_score,
+        "matched": keyword_match is not None,
+        "matchType": None if keyword_match is None else "keyword" if keyword_match else "semantic",
     }
 
 
-def _person_stats():
+def _person_stats(person_ids):
     return (
         select(
             TranscriptionChunk.person_id.label("person_id"),
@@ -116,13 +156,14 @@ def _person_stats():
             func.count(func.distinct(TranscriptionChunk.recording_id)).label("recording_count"),
             func.sum(TranscriptionChunk.word_count).label("word_count"),
         )
+        .where(TranscriptionChunk.person_id.in_(person_ids))
         .group_by(TranscriptionChunk.person_id)
         .subquery()
     )
 
 
-def _person_select(similarity=None):
-    stats = _person_stats()
+def _person_select(person_ids, similarity=None):
+    stats = _person_stats(person_ids)
     return (
         select(
             Person,
@@ -132,6 +173,7 @@ def _person_select(similarity=None):
             similarity if similarity is not None else literal(None),
         )
         .outerjoin(stats, stats.c.person_id == Person.id)
+        .where(Person.id.in_(person_ids))
     )
 
 
@@ -166,19 +208,22 @@ def _get_chunk(session, chunk_id, lock=False):
 
 
 def _person_response(session, person_id):
-    row = session.execute(_person_select().where(Person.id == person_id)).one_or_none()
+    row = session.execute(_person_select([person_id])).one_or_none()
     if row is None:
         raise ExplorerError(404, "Person not found.")
     return _person_dict(row)
 
 
-def _chunk_page(session, conditions, similarity, limit, offset, order_by=None):
+def _chunk_page(session, conditions, similarity, limit, offset, order_by=None,
+                match_score=None, keyword_match=None):
     total = session.scalar(
         select(func.count()).select_from(TranscriptionChunk).join(Recording).where(*conditions)
     )
     score = similarity if similarity is not None else literal(None)
     query = (
-        select(TranscriptionChunk, score)
+        select(TranscriptionChunk, score,
+               match_score if match_score is not None else literal(None),
+               keyword_match if keyword_match is not None else literal(None))
         .join(Recording)
         .where(*conditions)
         .options(
@@ -191,46 +236,150 @@ def _chunk_page(session, conditions, similarity, limit, offset, order_by=None):
         .offset(offset)
     )
     return {
-        "items": [_chunk_dict(chunk, value) for chunk, value in session.execute(query).all()],
+        "items": [_chunk_dict(chunk, value, rank, keyword) for chunk, value, rank, keyword in session.execute(query).all()],
         "total": total,
         "limit": limit,
         "offset": offset,
     }
 
 
-def _query_embedding(q):
+@lru_cache(maxsize=128)
+def query_embedding(q):
     try:
-        import audio_processer
-        from main import processing_lock
+        from audio_processer import create_query_embedding
 
-        with processing_lock:
-            vector = _valid_vector(audio_processer.create_query_embedding(q), TEXT_EMBEDDING_DIM)
+        vector = _valid_vector(create_query_embedding(q), TEXT_EMBEDDING_DIM)
         if vector is None:
-            raise ValueError("The text embedding model returned an invalid vector.")
-        return vector
+            raise ValueError("Invalid text query vector")
+        return tuple(vector)
     except Exception as exc:
-        logger.exception("Conversation semantic search could not generate a query embedding")
-        raise ExplorerError(503, "Semantic search is unavailable. Try text search or retry shortly.") from exc
+        logger.exception("Could not create a conversation search embedding")
+        raise ExplorerError(503, "Semantic search is temporarily unavailable. Please retry shortly.") from exc
 
 
-def search_chunks(q="", mode="semantic", assignment="all", limit=25, offset=0):
-    conditions = []
-    if assignment == "assigned":
-        conditions.append(TranscriptionChunk.person_id.is_not(None))
-    elif assignment == "unassigned":
-        conditions.append(TranscriptionChunk.person_id.is_(None))
-    similarity = None
-    order_by = None
+def _matching_chunks(q, assignment, reference):
+    conditions = _assignment_conditions(assignment)
+    if not q:
+        return conditions, None, None, None
+    similarity = _similarity(TranscriptionChunk.text_embedding, reference)
+    keyword = TranscriptionChunk.text.icontains(q, autoescape=True)
+    # Literal matches stay discoverable even when their vector is a weak match.
+    conditions.extend([TranscriptionChunk.word_count >= MIN_SEARCH_WORDS,
+                       or_(keyword, similarity >= MIN_TEXT_SIMILARITY)])
+    match_score = func.coalesce(similarity, 0.0) + case((keyword, KEYWORD_BONUS), else_=0.0)
+    return conditions, similarity, match_score, keyword
+
+
+def search_chunks(q="", assignment="unassigned", limit=25, offset=0):
     q = q.strip()
-    if q:
-        if mode == "text":
-            conditions.append(TranscriptionChunk.text.icontains(q, autoescape=True))
-        else:
-            similarity = _similarity(TranscriptionChunk.text_embedding, _query_embedding(q))
-            conditions.append(similarity.is_not(None))
-            order_by = [similarity.desc().nullslast(), TranscriptionChunk.id]
+    reference = query_embedding(q) if q else None
+    conditions, similarity, match_score, keyword = _matching_chunks(q, assignment, reference)
     with SessionLocal() as session:
-        return _chunk_page(session, conditions, similarity, limit, offset, order_by)
+        order = [match_score.desc(), TranscriptionChunk.id] if q else None
+        return {**_chunk_page(session, conditions, similarity, limit, offset, order, match_score, keyword),
+                **_search_metadata()}
+
+
+def _conversation_select(recording_ids):
+    stats = select(
+        TranscriptionChunk.recording_id.label("recording_id"),
+        func.count().label("chunk_count"),
+        func.sum(TranscriptionChunk.word_count).label("word_count"),
+        func.max(TranscriptionChunk.end_ms).label("duration_ms"),
+        func.count(func.distinct(TranscriptionChunk.person_id)).label("person_count"),
+    ).where(TranscriptionChunk.recording_id.in_(recording_ids)).group_by(TranscriptionChunk.recording_id).subquery()
+    preview = select(func.substr(TranscriptionChunk.text, 1, 240)).where(
+        TranscriptionChunk.recording_id == Recording.id,
+    ).order_by(TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id).limit(1).scalar_subquery()
+    return select(
+        Recording, func.coalesce(stats.c.chunk_count, 0), func.coalesce(stats.c.word_count, 0),
+        func.coalesce(stats.c.duration_ms, 0), func.coalesce(stats.c.person_count, 0), preview,
+    ).outerjoin(stats, stats.c.recording_id == Recording.id).where(Recording.id.in_(recording_ids))
+
+
+def _conversation_dict(row):
+    recording, chunks, words, duration, people, preview = row
+    return {
+        "id": recording.id, "timestamp": recording.timestamp, "language": recording.language,
+        "chunkCount": chunks, "wordCount": words, "durationMs": duration, "personCount": people,
+        "preview": preview or "", "similarity": None,
+        "matchScore": None, "matchedChunkIds": [],
+    }
+
+
+def list_conversations(q="", assignment="all", limit=25, offset=0):
+    q = q.strip()
+    reference = query_embedding(q) if q else None
+    conditions, chunk_similarity, chunk_score, _ = _matching_chunks(q, assignment, reference)
+    with SessionLocal() as session:
+        order = []
+        recording_conditions = []
+        if assignment != "all":
+            recording_conditions.append(select(TranscriptionChunk.id).where(
+                TranscriptionChunk.recording_id == Recording.id, *_assignment_conditions(assignment),
+            ).exists())
+        if q:
+            # Aggregate all qualifying chunks before pagination, without a candidate cap.
+            matches = select(
+                TranscriptionChunk.recording_id.label("recording_id"),
+                func.max(chunk_similarity).label("similarity"),
+                func.sum(chunk_score).label("match_score"),
+            ).where(*conditions).group_by(TranscriptionChunk.recording_id).subquery()
+            query = select(Recording.id, matches.c.similarity, matches.c.match_score).join(
+                matches, matches.c.recording_id == Recording.id,
+            )
+            order = [matches.c.match_score.desc()]
+        else:
+            query = select(Recording.id, literal(None), literal(None)).where(*recording_conditions)
+        total = session.scalar(select(func.count()).select_from(query.subquery()))
+        page = session.execute(
+            query.order_by(*order, Recording.timestamp.desc(), Recording.id.desc()).limit(limit).offset(offset)
+        ).all()
+        by_id = {row[0].id: _conversation_dict(row) for row in session.execute(
+            _conversation_select([id for id, _, _ in page]),
+        )} if page else {}
+        items = [{**by_id[id], "similarity": _score(similarity), "matchScore": match_score}
+                 for id, similarity, match_score in page]
+        if q and items:
+            by_id = {item["id"]: item for item in items}
+            for chunk_id, recording_id in session.execute(select(
+                TranscriptionChunk.id, TranscriptionChunk.recording_id,
+            ).where(TranscriptionChunk.recording_id.in_(by_id), *conditions).order_by(
+                TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id,
+            )):
+                by_id[recording_id]["matchedChunkIds"].append(chunk_id)
+        return {"items": items, "total": total, "limit": limit, "offset": offset,
+                **_search_metadata()}
+
+
+def get_conversation(recording_id, q="", assignment="all"):
+    q = q.strip()
+    with SessionLocal() as session:
+        row = session.execute(_conversation_select([recording_id])).one_or_none()
+        if row is None:
+            raise ExplorerError(404, "Conversation not found.")
+        result = _conversation_dict(row)
+        reference = query_embedding(q) if q else None
+        matches = {}
+        if q:
+            conditions, similarity, match_score, keyword = _matching_chunks(q, assignment, reference)
+            matches = {id: (value, rank, exact) for id, value, rank, exact in session.execute(select(
+                TranscriptionChunk.id, similarity, match_score, keyword,
+            ).where(TranscriptionChunk.recording_id == recording_id, *conditions))}
+            result["similarity"] = _score(max((value for value, _, _ in matches.values() if value is not None), default=None))
+            result["matchScore"] = math.fsum(rank for _, rank, _ in matches.values())
+        chunks = session.scalars(select(TranscriptionChunk).where(
+            TranscriptionChunk.recording_id == recording_id,
+        ).options(
+            joinedload(TranscriptionChunk.recording), joinedload(TranscriptionChunk.person),
+            selectinload(TranscriptionChunk.words),
+        ).order_by(TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id)).all()
+        result["chunks"] = [
+            _chunk_dict(chunk, *matches.get(chunk.id, (None, None, None)))
+            for chunk in chunks
+        ]
+        result["matchedChunkIds"] = [chunk.id for chunk in chunks if chunk.id in matches]
+        return result
 
 
 def get_chunk(chunk_id):
@@ -238,19 +387,119 @@ def get_chunk(chunk_id):
         return _chunk_dict(_get_chunk(session, chunk_id))
 
 
-def list_persons(chunk_id=None):
+def _replace_words(chunk, replacement):
+    start, end, text = replacement["start"], replacement["end"], replacement["text"].strip()
+    if not text or not 0 <= start < end <= len(chunk.text):
+        raise ExplorerError(422, "Select words and enter a non-empty replacement.")
+    if chunk.text[start:end] == text:
+        return False
+    before, selected, after = [], [], []
+    spans = []
+    cursor = 0
+
+    def fill_gap(end):
+        for match in re.finditer(r"\S+", chunk.text[cursor:end]):
+            spans.append((cursor + match.start(), cursor + match.end(), TranscriptionWord(
+                word=match.group(), start_ms=chunk.start_ms, end_ms=chunk.end_ms,
+                confidence=None, is_edited=False,
+            )))
+
+    for word in sorted(chunk.words, key=lambda item: item.word_index):
+        spoken = word.word.strip()
+        position = chunk.text.find(spoken, cursor) if spoken else -1
+        if position < 0:
+            raise ExplorerError(409, "Word alignment has changed. Reopen the inspector and retry.")
+        fill_gap(position)
+        cursor = position + len(spoken)
+        spans.append((position, cursor, word))
+    fill_gap(len(chunk.text))
+    for position, word_end, word in spans:
+        if word_end <= start:
+            before.append(word)
+        elif position >= end:
+            after.append(word)
+        elif position < start or word_end > end:
+            raise ExplorerError(422, "Select complete words to replace.")
+        else:
+            selected.append(word)
+    # Replacement words inherit the selected interval, without claiming new alignment accuracy.
+    replacements = [TranscriptionWord(
+        word=spoken,
+        start_ms=min((word.start_ms for word in selected), default=chunk.start_ms),
+        end_ms=max((word.end_ms for word in selected), default=chunk.end_ms),
+        raw_speaker_label=selected[0].raw_speaker_label if selected else None,
+        confidence=None,
+        is_edited=True,
+    ) for spoken in re.findall(r"\S+", text)]
+    chunk.words = before + replacements + after
+    for index, word in enumerate(chunk.words):
+        word.word_index = index
+    chunk.text = chunk.text[:start] + text + chunk.text[end:]
+    chunk.word_count = len(chunk.text.split())
+    return True
+
+
+def edit_transcripts(edits):
+    by_id = {edit["chunkId"]: edit for edit in edits}
+    if len(by_id) != len(edits):
+        raise ExplorerError(422, "Each chunk must appear only once.")
+    with SessionLocal.begin() as session:
+        chunks = [_get_chunk(session, chunk_id, lock=True) for chunk_id in sorted(by_id)]
+        changed = []
+        for chunk in chunks:
+            edit = by_id[chunk.id]
+            if chunk.text != edit["originalText"]:
+                raise ExplorerError(409, "A transcript changed since it was opened. Reopen the inspector and retry.")
+            modified = False
+            for replacement in edit["replacements"]:
+                modified = _replace_words(chunk, replacement) or modified
+            if modified:
+                changed.append(chunk)
+        if changed:
+            try:
+                from audio_processer import assign_text_embeddings
+
+                assign_text_embeddings(changed)
+                if any(_valid_vector(chunk.text_embedding, TEXT_EMBEDDING_DIM) is None for chunk in changed):
+                    raise ValueError("Invalid transcript embedding")
+            except Exception as exc:
+                logger.exception("Could not update corrected transcript embeddings")
+                raise ExplorerError(503, "Could not update text embeddings. Your edits have not been saved. Please retry.") from exc
+            people = _lock_persons(session, [chunk.person_id for chunk in changed])
+            session.flush()
+            for person in people.values():
+                _recompute_person(session, person)
+        session.flush()
+        return {"chunks": [_chunk_dict(chunk) for chunk in chunks]}
+
+
+def _person_name_order():
+    return func.lower(func.coalesce(Person.name, literal_column("''"))).collate("C")
+
+
+def list_persons(chunk_id=None, q="", limit=25, offset=0):
     with SessionLocal() as session:
         similarity = None
+        reference = None
+        name_order = _person_name_order()
+        conditions = [name_order.startswith(q.strip().lower(), autoescape=True)] if q.strip() else []
         if chunk_id is not None:
             chunk = _get_chunk(session, chunk_id)
             reference = _valid_vector(chunk.voice_embedding)
             if reference is not None:
                 similarity = _similarity(Person.voice_embedding, reference)
-        query = _person_select(similarity)
+        order = [similarity.desc().nullslast()] if similarity is not None else []
+        candidates = select(Person.id).where(*conditions).order_by(*order, name_order, Person.id)
+        page_ids = session.scalars(candidates.limit(limit + 1).offset(offset)).all()
+        total = session.scalar(select(func.count()).select_from(Person).where(*conditions))
+        has_more = len(page_ids) > limit
+        query = _person_select(page_ids[:limit], similarity)
         if similarity is not None:
             query = query.order_by(similarity.desc().nullslast())
-        query = query.order_by(func.lower(func.coalesce(Person.name, "")), Person.id)
-        return {"items": [_person_dict(row) for row in session.execute(query).all()]}
+        query = query.order_by(name_order, Person.id)
+        return {"items": [_person_dict(row) for row in session.execute(query).all()],
+                "total": total, "limit": limit, "offset": offset, "hasMore": has_more,
+                **_search_metadata()}
 
 
 def get_person(person_id):
@@ -291,11 +540,12 @@ def similar_chunks(chunk_id=None, person_id=None, scope="other", limit=25, offse
                 TranscriptionChunk.person_id != selected_person_id,
             ))
         similarity = _similarity(TranscriptionChunk.voice_embedding, reference)
-        conditions.append(similarity.is_not(None))
-        return _chunk_page(
+        ids = _nearest_ids(session, TranscriptionChunk, TranscriptionChunk.voice_embedding, reference, conditions)
+        conditions.append(TranscriptionChunk.id.in_(ids))
+        return {**_chunk_page(
             session, conditions, similarity, limit, offset,
             [similarity.desc().nullslast(), TranscriptionChunk.id],
-        )
+        ), **_search_metadata(True)}
 
 
 def _name(name):
@@ -321,7 +571,7 @@ def _lock_persons(session, person_ids):
     ids = sorted({person_id for person_id in person_ids if person_id is not None})
     if not ids:
         return {}
-    # Every assignment locks its chunk first, then the affected people in ID order.
+    # Chunk mutations lock the chunk first, then affected people in ID order.
     people = session.execute(
         select(Person).where(Person.id.in_(ids)).order_by(Person.id).with_for_update()
     ).scalars().all()
@@ -341,18 +591,14 @@ def _recompute_person(session, person, require_embedding=False):
     person.voice_embedding_word_count = weight if embedding is not None else 0
 
 
-def _require_speech(chunk):
-    embedding, _weight = weighted_voice_embedding([chunk])
-    if embedding is None:
-        raise ExplorerError(422, "This chunk has no usable voice embedding with spoken words.")
-
-
 def _assign_in_session(session, chunk, people, person_id):
     previous_id = chunk.person_id
     chunk.person = people.get(person_id)
     session.flush()
     for affected_id in sorted({value for value in (previous_id, person_id) if value is not None}):
-        _recompute_person(session, people[affected_id], require_embedding=affected_id == person_id)
+        _recompute_person(session, people[affected_id], require_embedding=(
+            affected_id == person_id and weighted_voice_embedding([chunk])[0] is not None
+        ))
     session.flush()
     return {
         "person": _person_response(session, person_id) if person_id is not None else None,
@@ -364,7 +610,6 @@ def create_person(name, chunk_id):
     name = _name(name)
     with SessionLocal.begin() as session:
         chunk = _get_chunk(session, chunk_id, lock=True)
-        _require_speech(chunk)
         # Lock the existing profile before creating the new one to keep lock order stable.
         people = _lock_persons(session, [chunk.person_id])
         person = Person(name=name, voice_embedding_word_count=0)
@@ -377,7 +622,16 @@ def create_person(name, chunk_id):
 def assign_person(chunk_id, person_id):
     with SessionLocal.begin() as session:
         chunk = _get_chunk(session, chunk_id, lock=True)
-        if person_id is not None:
-            _require_speech(chunk)
         people = _lock_persons(session, [chunk.person_id, person_id])
         return _assign_in_session(session, chunk, people, person_id)
+
+
+def delete_chunk(chunk_id):
+    with SessionLocal.begin() as session:
+        chunk = _get_chunk(session, chunk_id, lock=True)
+        people = _lock_persons(session, [chunk.person_id])
+        # Keep the recording timestamp so re-uploading cannot recreate deleted speech.
+        session.delete(chunk)
+        session.flush()
+        for person in people.values():
+            _recompute_person(session, person)

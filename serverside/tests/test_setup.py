@@ -1,5 +1,6 @@
 import base64
 from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,6 +21,7 @@ import audio_processer
 import db_interaction
 from db.models import Base, Person, Recording, SetupState, TranscriptionChunk
 import encryption
+import explorer_service
 import main
 import setup_service
 
@@ -37,7 +39,7 @@ class SetupTests(unittest.TestCase):
         self.engine = create_engine(f"sqlite:///{directory}/test.db", connect_args={"check_same_thread": False})
         self.addCleanup(self.engine.dispose)
         self.sessions = sessionmaker(bind=self.engine)
-        for module in (main, setup_service, db_interaction):
+        for module in (main, setup_service, db_interaction, explorer_service):
             self.stack.enter_context(patch.object(module, "SessionLocal", self.sessions))
         self.stack.enter_context(patch.object(main, "initialize_database", lambda: Base.metadata.create_all(self.engine)))
         self.stack.enter_context(patch.object(encryption, "FILEPATH", str(Path(directory) / "private.key")))
@@ -127,17 +129,24 @@ class SetupTests(unittest.TestCase):
     def test_encrypted_upload_progress_and_profile_persist(self):
         self.arm()
         chunks = self.chunks()
+        unknown = self.client.get("/api/uploads/123456")
+        self.assertEqual(unknown.json(), {"complete": False, "receivedChunks": []})
+        self.assertEqual(unknown.headers["cache-control"], "no-store")
         self.send([chunks[1], chunks[1]])
+        self.assertEqual(self.client.get("/api/uploads/123456").json(),
+                         {"complete": False, "totalChunks": 2, "receivedChunks": [1]})
         status = self.status()
         self.assertEqual((status["stage"], status["receivedChunks"], status["totalChunks"]), ("receiving", 1, 2))
         self.release.clear()
         self.send([chunks[0]])
         self.assertTrue(self.transcribing.wait(5))
+        self.assertTrue(self.client.get("/api/uploads/123456").json()["complete"])
         self.assertEqual(self.status()["stage"], "transcribing")
         self.assertEqual(self.client.post("/api/setup/step", json={"step": "reading"}).status_code, 409)
         self.send(chunks)
         self.release.set()
         self.wait_for(lambda: self.status()["stage"] == "complete")
+        self.assertTrue(self.client.get("/api/uploads/123456").json()["complete"])
         with self.sessions() as session:
             person = session.scalar(select(Person))
             self.assertEqual(person.name, "Me")
@@ -221,6 +230,82 @@ class SetupTests(unittest.TestCase):
         with self.sessions() as session:
             self.assertIsNotNone(session.scalar(select(Recording)))
             self.assertIsNone(session.scalar(select(Person)))
+
+    def test_language_configuration_is_validated_and_persists(self):
+        self.assertEqual(self.status()["expectedLanguages"], ["en"])
+        response = self.client.put("/api/setup/languages", json={"expectedLanguages": [" EN ", "de", "de"]})
+        self.assertEqual(response.status_code, 200)
+        setup_service.initialize_setup()
+        self.assertEqual(self.status()["expectedLanguages"], ["en", "de"])
+        for languages in ([], ["xx"], ["en", ""]):
+            self.assertEqual(self.client.put("/api/setup/languages", json={"expectedLanguages": languages}).status_code, 422)
+        with self.sessions.begin() as session:
+            session.get(SetupState, 1).stage = "complete"
+        self.assertEqual(self.client.put("/api/setup/languages", json={"expectedLanguages": ["de"]}).status_code, 200)
+        self.assertEqual(self.status()["expectedLanguages"], ["de"])
+        codes = {item["code"] for item in self.client.get("/api/setup/languages").json()["languages"]}
+        self.assertTrue({"en", "de", "jw", "nn"} <= codes)
+
+    def test_rapid_encrypted_uploads_are_sequential_and_http_stays_responsive(self):
+        self.client.post("/api/keys/create")
+        self.release.clear()
+        for timestamp in range(100, 105):
+            self.send(self.chunks(timestamp=timestamp, seconds=1))
+        self.assertTrue(self.transcribing.wait(5))
+        self.assertEqual(main.processing_recordings, set(range(100, 105)))
+        self.assertEqual(self.status()["stage"], "device")
+        self.assertEqual(self.client.get("/api/explorer/chunks?mode=text").status_code, 200)
+        self.assertEqual(self.client.get("/api/uploads").status_code, 200)
+        self.release.set()
+        self.wait_for(lambda: not main.processing_recordings)
+        with self.sessions() as session:
+            self.assertEqual(session.scalar(select(func.count()).select_from(Recording)), 5)
+
+    def test_failed_upload_job_does_not_stop_next_recording(self):
+        self.client.post("/api/keys/create")
+        with patch.object(audio_processer, "transcribe_with_whisperx", side_effect=[
+            ValueError("model failure"), self.transcribe(None, lambda *args: None),
+        ]):
+            self.send(self.chunks(timestamp=100, seconds=1))
+            self.send(self.chunks(timestamp=101, seconds=1))
+            self.wait_for(lambda: not main.processing_recordings)
+        with self.sessions() as session:
+            self.assertEqual(list(session.scalars(select(Recording.timestamp))), [101])
+
+    def test_concurrent_duplicate_uploads_queue_once(self):
+        self.client.post("/api/keys/create")
+        chunk = self.chunks(timestamp=100, seconds=1, count=1)[0]
+        self.release.clear()
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            responses = list(executor.map(lambda _: self.client.post("/upload", json=chunk), range(8)))
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+        self.assertEqual(main.processing_recordings, {100})
+        self.release.set()
+        self.wait_for(lambda: not main.processing_recordings)
+        with self.sessions() as session:
+            self.assertEqual(session.scalar(select(func.count()).select_from(Recording)), 1)
+
+    def test_spool_failure_releases_timestamp_for_retry(self):
+        self.client.post("/api/keys/create")
+        chunks = self.chunks(timestamp=100, seconds=1, count=1)
+        with patch.object(self.client.app.state.processing_queue, "enqueue", side_effect=OSError("disk full")):
+            self.assertEqual(self.client.post("/upload", json=chunks[0]).status_code, 503)
+        self.assertFalse(main.processing_recordings)
+        self.assertFalse(main.recordings)
+        self.send(chunks)
+        self.wait_for(lambda: not main.processing_recordings)
+        with self.sessions() as session:
+            self.assertIsNotNone(session.scalar(select(Recording)))
+
+    def test_skipped_job_records_reason_without_empty_database_rows(self):
+        self.client.post("/api/keys/create")
+        with patch.object(audio_processer, "transcribe_with_whisperx", side_effect=audio_processer.RecordingSkipped("no speech detected")):
+            self.send(self.chunks(seconds=1))
+            self.wait_for(lambda: not main.processing_recordings)
+        events = self.client.get("/api/uploads").json()["uploads"]
+        self.assertIn({"status": "skipped", "timestamp": 123456, "reason": "no speech detected"}, events)
+        with self.sessions() as session:
+            self.assertIsNone(session.scalar(select(Recording)))
 
     def test_chunk_boundaries_skip_unaligned_words_and_preserve_chunk_size(self):
         words = [audio_processer.TranscriptWord("word", i * 10, (i + 1) * 10, None, .9) for i in range(501)]

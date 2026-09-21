@@ -30,6 +30,7 @@ class Recording:
             self.complete = b"".join(
                 self.chunks[i] for i in range(self.total_chunks)
             )
+            self.chunks.clear()
             return True
 
         return False

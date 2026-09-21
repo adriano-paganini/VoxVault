@@ -1,32 +1,23 @@
 import os
+import logging
+import math
 from dataclasses import asdict, dataclass
-from functools import lru_cache
 import torch
 import db_interaction
+import setup_service
+from ml_models import RecordingSkipped, device, models
 
 import db.models
 
-device = os.getenv("WHISPERX_DEVICE")
-if not device:
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+logger = logging.getLogger(__name__)
 
 
-@lru_cache(maxsize=1)
 def get_speaker_model():
-    from speechbrain.inference.speaker import EncoderClassifier
-
-    return EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb",
-        savedir="models/spkrec-ecapa-voxceleb",
-        run_opts={"device": device},
-    )
+    return models.speaker()
 
 
-@lru_cache(maxsize=1)
 def get_text_embedding_model():
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer("intfloat/multilingual-e5-small", device=device)
+    return models.text()
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
@@ -62,48 +53,136 @@ def pcm_bytes_to_float32_mono(audio: bytes):
     import numpy as np
 
     samples = np.frombuffer(audio, dtype="<i2")
-    return samples.astype("float32") / 32768.0
+    waveform = samples.astype("float32")
+    waveform *= 1.0 / 32768.0
+    return waveform
 
+def speech_segments(model, waveform):
+    vad = model.vad_model
+    segments = vad({"waveform": vad.preprocess_audio(waveform), "sample_rate": SAMPLE_RATE})
+    chunks = vad.merge_chunks(
+        segments, 30,
+        onset=model._vad_params["vad_onset"], offset=model._vad_params["vad_offset"],
+    )
+    chunks = [chunk for chunk in chunks if chunk["end"] > chunk["start"]]
+    if not chunks:
+        raise RecordingSkipped("no speech detected")
+    return chunks
+
+
+def select_language(model, waveform, chunks, expected_languages):
+    if len(expected_languages) == 1:
+        language = expected_languages[0]
+        logger.info("Using configured language: %s", language)
+        return language
+    if not expected_languages:
+        raise RecordingSkipped("no expected languages configured")
+
+    import numpy as np
+
+    # Detect on up to 30 seconds of VAD speech, excluding leading silence and gaps.
+    remaining = SAMPLE_RATE * 30
+    speech = []
+    for chunk in chunks:
+        for start, end in chunk["segments"]:
+            samples = waveform[max(0, int(start * SAMPLE_RATE)):int(end * SAMPLE_RATE)][:remaining]
+            if len(samples):
+                speech.append(samples)
+                remaining -= len(samples)
+            if remaining == 0:
+                break
+        if remaining == 0:
+            break
+    if not speech:
+        raise RecordingSkipped("no speech detected")
+    # Faster Whisper exposes probability; WhisperX's wrapper drops it.
+    language, probability, _ = model.model.detect_language(audio=np.concatenate(speech))
+    if language not in expected_languages:
+        raise RecordingSkipped(f"unexpected detected language: {language}")
+    threshold = float(os.getenv("WHISPERX_LANGUAGE_MIN_CONFIDENCE", "0.7"))
+    if not 0 <= threshold <= 1:
+        raise ValueError("WHISPERX_LANGUAGE_MIN_CONFIDENCE must be between 0 and 1")
+    if probability is None or not math.isfinite(probability) or not threshold <= probability <= 1:
+        raise RecordingSkipped(f"unreliable language detection: {language} (confidence={probability})")
+    logger.info("Detected language: %s (%.2f, accepted)", language, probability)
+    return language
+
+
+def transcribe_speech(model, waveform, chunks, language):
+    from whisperx.vads.vad import Vad
+
+    class PreparedVad(Vad):
+        """Feed the completed VAD pass back into WhisperX without repeating inference."""
+
+        def __init__(self):
+            pass
+
+        @staticmethod
+        def preprocess_audio(audio):
+            return None
+
+        def __call__(self, audio):
+            return chunks
+
+        @staticmethod
+        def merge_chunks(segments, *args, **kwargs):
+            return segments
+
+    original_vad = model.vad_model
+    model.vad_model = PreparedVad()
+    try:
+        return model.transcribe(
+            waveform, batch_size=int(os.getenv("WHISPERX_BATCH_SIZE", "8")), language=language,
+        )
+    finally:
+        # Never leave a per-recording VAD adapter or tokenizer on the shared pipeline.
+        model.vad_model = original_vad
+        model.tokenizer = None
+
+
+@torch.inference_mode()
 def transcribe_with_whisperx(audio: bytes, progress, enrollment=False) -> dict:
     import whisperx
 
-    model_name = os.getenv("WHISPERX_MODEL", "small")
-    compute_type = os.getenv(
-        "WHISPERX_COMPUTE_TYPE",
-        "float16" if device == "cuda:0" else "int8",
-    )
-    batch_size = int(os.getenv("WHISPERX_BATCH_SIZE", "8"))
-
+    expected_languages = setup_service.get_expected_languages()
+    models.restrict_alignment_languages(expected_languages)
     waveform = pcm_bytes_to_float32_mono(audio)
 
     progress("transcribing", "Loading the speech model and transcribing your recording.")
-    model = whisperx.load_model(
-        model_name, device, compute_type=compute_type,
-        language="en" if enrollment else None,
-    )
-    result = model.transcribe(waveform, batch_size=batch_size)
+    model = models.transcription()
+    chunks = speech_segments(model, waveform)
+    language = select_language(model, waveform, chunks, expected_languages)
+    if language != "en" and not model.model.model.is_multilingual:
+        raise RecordingSkipped("the configured Whisper model supports only English")
+    result = transcribe_speech(model, waveform, chunks, language)
+    segments = [segment for segment in result.get("segments", []) if segment.get("text", "").strip()]
+    if not segments:
+        raise RecordingSkipped("no usable transcription after speech detection")
 
     progress("aligning", "Matching the spoken words to the audio.")
-    align_model, metadata = whisperx.load_align_model(
-        language_code=result["language"],
-        device=device,
-    )
+    align_model, metadata = models.alignment(language, expected_languages)
     result = whisperx.align(
-        result["segments"],
+        segments,
         align_model,
         metadata,
         waveform,
         device,
         return_char_alignments=False,
     )
+    result["language"] = language
+    if not any(
+        word.start_ms is not None and word.end_ms is not None
+        and 0 <= word.start_ms < word.end_ms <= len(waveform) * 1000 / SAMPLE_RATE
+        and any(character.isalnum() for character in word.word)
+        for word in result_to_words(result)
+    ):
+        raise RecordingSkipped("no usable aligned words")
 
-    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
-    if hf_token and not enrollment:
-        from whisperx.diarize import DiarizationPipeline
-
-        diarize_model = DiarizationPipeline(token=hf_token, device=device)
-        diarize_segments = diarize_model(waveform)
-        result = whisperx.assign_word_speakers(diarize_segments, result)
+    if not enrollment:
+        diarize_model = models.diarization()
+        if diarize_model is not None:
+            diarize_segments = diarize_model(waveform)
+            result = whisperx.assign_word_speakers(diarize_segments, result)
 
     return result
 
@@ -112,6 +191,8 @@ def result_to_words(result: dict) -> list[TranscriptWord]:
 
     for segment in result.get("segments", []):
         for word in segment.get("words", []):
+            if not word.get("word", "").strip():
+                continue
             start = word.get("start")
             end = word.get("end")
 
@@ -142,12 +223,10 @@ def process_audio_bytes(audio: bytes, timestamp: int, progress=None, enrollment=
         words=result_to_words(result),
     )
 
-    print(
-        f"Processed recording {timestamp}: {len(processed.words)} words.",
-        flush=True,
-    )
-
     chunk_audio, chunk_object, word_object = extract_chunks(audio, processed)
+    del result, word_object
+    if not chunk_object or not any(character.isalnum() for chunk in chunk_object for character in chunk.text):
+        raise RecordingSkipped("no usable aligned words")
 
     if enrollment and sum(chunk.word_count for chunk in chunk_object) < 50:
         raise EnrollmentError("Too little clear speech was detected. Read the full passage again in a quiet room.")
@@ -158,7 +237,7 @@ def process_audio_bytes(audio: bytes, timestamp: int, progress=None, enrollment=
     assign_audio_embeddings(zip(chunk_object,chunk_audio))
 
     full_recording = db.models.Recording(timestamp =timestamp,
-                                         language = result.get("language"),
+                                         language = processed.language,
                                          chunks = chunk_object)
 
     for chunk in chunk_object:
@@ -207,19 +286,21 @@ def assign_text_embeddings(chunks:list[db.models.TranscriptionChunk]):
     texts = [
         "passage: " + chunk.text for chunk in chunks
     ]
-    embeddings = get_text_embedding_model().encode(
-        texts,
-        normalize_embeddings=True,
-    )
+    with models.text_inference_lock, torch.inference_mode():
+        embeddings = get_text_embedding_model().encode(
+            texts,
+            normalize_embeddings=True,
+        )
 
     for chunk,embedding in zip(chunks, embeddings):
         chunk.text_embedding = embedding.tolist()
 
 def create_query_embedding(query: str) -> list[float]:
-    embedding = get_text_embedding_model().encode(
-        "query: " + query,
-        normalize_embeddings=True,
-    )
+    with models.text_inference_lock, torch.inference_mode():
+        embedding = get_text_embedding_model().encode(
+            "query: " + query,
+            normalize_embeddings=True,
+        )
 
     return embedding.tolist()
 
@@ -298,14 +379,9 @@ def extract_chunks(audio: bytes, processed: AudioProcessingResult):
     # PCM16 = 2 bytes per sample
     bytes_per_ms = SAMPLE_RATE * CHANNELS * 2 / 1000
 
-    chunk_audio = []
-
-    for chunk in chunks:
-        starting_byte = int(chunk.start_ms * bytes_per_ms)
-        ending_byte = int(chunk.end_ms * bytes_per_ms)
-
-        chunk_audio.append(
-            audio[starting_byte:ending_byte]
-        )
+    chunk_audio = (
+        memoryview(audio)[int(chunk.start_ms * bytes_per_ms):int(chunk.end_ms * bytes_per_ms)]
+        for chunk in chunks
+    )
 
     return chunk_audio, chunks, word_objects

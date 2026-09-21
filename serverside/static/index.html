@@ -4,14 +4,19 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VoxVault Setup</title>
-    <link rel="stylesheet" href="/static/style.css?v=8" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/brand/apple-touch-icon.png" />
+    <link rel="stylesheet" href="/static/style.css?v=10" />
   </head>
   <body>
     <main class="shell">
       <header class="view-heading">
-        <div>
-          <p class="eyebrow">Personal voice archive</p>
-          <h1>VoxVault Setup</h1>
+        <div class="brand-heading">
+          <img class="brand-icon" src="/static/brand/voxvault-icon.png" alt="" width="56" height="56" />
+          <div>
+            <p class="eyebrow">Personal voice archive</p>
+            <h1>VoxVault Setup</h1>
+          </div>
         </div>
         <span id="connection-status" role="status">Connecting...</span>
       </header>
@@ -126,9 +131,15 @@
       <section id="reading-view" class="view hidden">
         <p class="eyebrow">Step 3 of 5 &middot; About 60-90 seconds</p>
         <h2>Record your voice</h2>
-        <p>
+        <p id="english-reading-instructions">
           On your phone, tap <strong>Listen</strong>, then read the full passage
           below at your normal pace. Use a quiet room, speak on your own, and
+          keep pauses brief so the app keeps a single recording.
+        </p>
+        <p id="other-reading-instructions" class="hidden">
+          On your phone, tap <strong>Listen</strong>. In one of your expected
+          languages, read a passage or speak naturally about the topics below
+          for about 60-90 seconds. Use a quiet room, speak on your own, and
           keep pauses brief so the app keeps a single recording.
         </p>
         <blockquote id="reading-text" class="reading-text"></blockquote>
@@ -256,10 +267,23 @@
           />
         </details>
       </section>
+      <section id="language-settings" class="language-settings hidden" aria-labelledby="languages-title">
+        <h2 id="languages-title">Expected spoken languages</h2>
+        <details id="language-options">
+          <summary id="selected-languages">Languages</summary>
+          <fieldset id="language-choices">
+            <legend>Spoken languages</legend>
+          </fieldset>
+        </details>
+        <div class="actions">
+          <button id="save-languages-button" type="button">Save languages</button>
+          <span id="languages-status" role="status" aria-live="polite"></span>
+        </div>
+      </section>
       <footer>
         <span id="copy-status" role="status" aria-live="polite"></span>
       </footer>
     </main>
-    <script src="/static/app.js?v=7"></script>
+    <script src="/static/app.js?v=8"></script>
   </body>
 </html>

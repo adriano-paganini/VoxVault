@@ -18,3 +18,4 @@ build
 Dockerfile
 docker-compose.yml
 *.key
+voxvault-processing-*/

@@ -3,7 +3,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -64,15 +64,54 @@ class PersonAssignment(BaseModel):
     personId: int | None = Field(gt=0)
 
 
-@router.get("/chunks")
-def chunks(
+class WordReplacement(BaseModel):
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class TranscriptEdit(BaseModel):
+    chunkId: int = Field(gt=0)
+    originalText: str
+    replacements: list[WordReplacement] = Field(min_length=1, max_length=1000)
+
+
+class TranscriptEdits(BaseModel):
+    chunks: list[TranscriptEdit] = Field(min_length=1, max_length=100)
+
+
+@router.put("/transcripts")
+def edit_transcripts(body: TranscriptEdits):
+    return explorer_service.edit_transcripts([chunk.model_dump() for chunk in body.chunks])
+
+
+@router.get("/conversations")
+def conversations(
     q: str = Query(default="", max_length=2000),
-    mode: Literal["semantic", "text"] = "semantic",
     assignment: Literal["all", "assigned", "unassigned"] = "all",
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    return explorer_service.search_chunks(q, mode, assignment, limit, offset)
+    return explorer_service.list_conversations(q, assignment, limit, offset)
+
+
+@router.get("/conversations/{recording_id}")
+def conversation(
+    recording_id: int,
+    q: str = Query(default="", max_length=2000),
+    assignment: Literal["all", "assigned", "unassigned"] = "all",
+):
+    return explorer_service.get_conversation(recording_id, q, assignment)
+
+
+@router.get("/chunks")
+def chunks(
+    q: str = Query(default="", max_length=2000),
+    assignment: Literal["all", "assigned", "unassigned"] = "unassigned",
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    return explorer_service.search_chunks(q, assignment, limit, offset)
 
 
 @router.get("/chunks/{chunk_id}")
@@ -80,9 +119,20 @@ def chunk(chunk_id: int):
     return explorer_service.get_chunk(chunk_id)
 
 
+@router.delete("/chunks/{chunk_id}", status_code=204)
+def delete_chunk(chunk_id: int):
+    explorer_service.delete_chunk(chunk_id)
+    return Response(status_code=204)
+
+
 @router.get("/persons")
-def persons(chunk_id: int | None = Query(default=None, gt=0)):
-    return explorer_service.list_persons(chunk_id)
+def persons(
+    chunk_id: int | None = Query(default=None, gt=0),
+    q: str = Query(default="", max_length=200),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+):
+    return explorer_service.list_persons(chunk_id, q, limit, offset)
 
 
 @router.post("/persons", status_code=201)

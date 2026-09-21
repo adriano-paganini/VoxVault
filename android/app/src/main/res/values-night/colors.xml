@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="vault_primary">#8CCDE2</color>
+    <color name="vault_on_primary">#103744</color>
+    <color name="vault_secondary">#91D4AF</color>
+    <color name="vault_primary_container">#244A58</color>
+    <color name="vault_surface">#14191B</color>
+    <color name="vault_on_surface">#E2E9EB</color>
+    <color name="vault_outline">#687B82</color>
+</resources>

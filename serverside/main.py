@@ -3,7 +3,7 @@ from io import BytesIO
 from json import dumps, loads
 import logging
 from os import getenv
-from threading import Lock, Thread
+from threading import Lock
 from urllib.parse import quote
 
 import qrcode
@@ -30,14 +30,24 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, model_validator
+from processing_queue import ProcessingQueue
 from sqlalchemy import select
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    initialize_database()
-    setup_service.initialize_setup()
-    yield
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    await run_in_threadpool(initialize_database)
+    await run_in_threadpool(setup_service.initialize_setup)
+    worker = ProcessingQueue(process_recording, finish_recording)
+    worker.start()
+    _app.state.processing_queue = worker
+    try:
+        yield
+    finally:
+        await run_in_threadpool(worker.close)
+        with upload_lock:
+            recordings.clear()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -48,7 +58,7 @@ upload_events = []
 recordings = {}
 processing_recordings = set()
 upload_lock = Lock()
-processing_lock = Lock()
+upload_events_lock = Lock()
 logger = logging.getLogger(__name__)
 
 class PingRequest(BaseModel):
@@ -72,6 +82,10 @@ class SetupStepRequest(BaseModel):
     step: str
 
 
+class LanguageSettingsRequest(BaseModel):
+    expectedLanguages: list[str] = Field(min_length=1, max_length=100)
+
+
 class QrCodeRequest(BaseModel):
     text: str
 
@@ -89,8 +103,9 @@ def model_to_json(model: BaseModel):
 
 
 def remember_upload_event(event):
-    upload_events.insert(0, event)
-    del upload_events[10:]
+    with upload_events_lock:
+        upload_events.insert(0, event)
+        del upload_events[10:]
 
 def public_key_deep_link(public_key: str):
     return f"voxvault://setup?key={quote(public_key, safe='')}"
@@ -143,6 +158,20 @@ def setup_step(body: SetupStepRequest):
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return setup_service.get_status()
+
+
+@app.get("/api/setup/languages")
+def setup_languages():
+    return {"languages": setup_service.available_languages()}
+
+
+@app.put("/api/setup/languages")
+def update_languages(body: LanguageSettingsRequest):
+    try:
+        languages = setup_service.set_expected_languages(body.expectedLanguages)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"expectedLanguages": languages}
 
 
 @app.get("/setup", include_in_schema=False)
@@ -251,38 +280,66 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.get("/api/uploads")
 async def uploads():
-    return {
-        "uploads": upload_events,
-    }
+    with upload_events_lock:
+        return {"uploads": list(upload_events)}
 
 
-def process_recording(audio, timestamp, enrollment):
+@app.get("/api/uploads/{timestamp}")
+def upload_status(timestamp: int, response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    with upload_lock:
+        if timestamp in processing_recordings:
+            return {"complete": True, "receivedChunks": []}
+        with SessionLocal() as session:
+            if session.scalar(select(StoredRecording.id).where(StoredRecording.timestamp == timestamp)):
+                return {"complete": True, "receivedChunks": []}
+        recording = recordings.get(timestamp)
+        if recording is None:
+            return {"complete": False, "receivedChunks": []}
+        return {"complete": False, "totalChunks": recording.total_chunks,
+                "receivedChunks": sorted(recording.chunks)}
+
+
+def process_recording(job):
+    timestamp, enrollment = job.timestamp, job.enrollment
+    logger.info("Processing recording %s", timestamp)
     try:
-        # Serialize model inference to bound memory usage in the Docker service.
-        with processing_lock:
-            import audio_processer
+        import audio_processer
 
-            audio_processer.process_audio_bytes(
-                audio, timestamp, enrollment=enrollment,
-                progress=lambda stage, message: setup_service.update_progress(timestamp, stage, message)
-                if enrollment else None,
-            )
+        processed = audio_processer.process_audio_bytes(
+            job.path.read_bytes(), timestamp, enrollment=enrollment,
+            progress=lambda stage, message: setup_service.update_progress(timestamp, stage, message)
+            if enrollment else None,
+        )
+        logger.info("Finished recording %s: %s words", timestamp, len(processed.words))
+        remember_upload_event({"status": "processed", "timestamp": timestamp})
     except Exception as exc:
-        logger.exception("Recording %s could not be processed", timestamp)
+        from ml_models import RecordingSkipped
+
+        skipped = isinstance(exc, RecordingSkipped)
+        if skipped:
+            logger.info("Skipping recording %s: %s", timestamp, exc)
+        else:
+            logger.exception("Recording %s could not be processed", timestamp)
+        event = {"status": "skipped" if skipped else "failed", "timestamp": timestamp}
+        if skipped:
+            event["reason"] = str(exc)
+        remember_upload_event(event)
         message = (
             str(exc) if isinstance(exc, ValueError)
             else "Processing failed. Check the server logs and model access, then send the recording again."
         )
         if enrollment:
             setup_service.fail(timestamp, message)
-        remember_upload_event({"status": "failed", "timestamp": timestamp})
-    finally:
-        with upload_lock:
-            processing_recordings.discard(timestamp)
+
+
+def finish_recording(timestamp):
+    with upload_lock:
+        processing_recordings.discard(timestamp)
 
 
 @app.post("/upload")
-def upload(chunk: UploadChunkRequest):
+def upload(chunk: UploadChunkRequest, request: Request):
     if not key_exists():
         raise HTTPException(status_code=409, detail="Create the server keys first.")
 
@@ -291,10 +348,10 @@ def upload(chunk: UploadChunkRequest):
         if status["stage"] == "failed" and status["recordingTimestamp"] == chunk.timestamp:
             raise HTTPException(status_code=409, detail="Choose a retry option in the setup page before uploading again.")
         if chunk.timestamp in processing_recordings:
-            return {"message": "Recording is already being processed."}
+            return {"message": "Recording is already being processed.", "recordingComplete": True}
         with SessionLocal() as session:
             if session.scalar(select(StoredRecording.id).where(StoredRecording.timestamp == chunk.timestamp)):
-                return {"message": "Recording is already saved."}
+                return {"message": "Recording is already saved.", "recordingComplete": True}
 
         enrollment = setup_service.claim_upload(chunk.timestamp, chunk.totalChunks)
         try:
@@ -325,8 +382,17 @@ def upload(chunk: UploadChunkRequest):
             if enrollment:
                 setup_service.update_progress(chunk.timestamp, "validating", "Recording received. Waiting to check the audio.")
             processing_recordings.add(chunk.timestamp)
+            try:
+                request.app.state.processing_queue.enqueue(
+                    recording.complete, chunk.timestamp, enrollment,
+                )
+            except Exception as exc:
+                processing_recordings.discard(chunk.timestamp)
+                recordings.pop(chunk.timestamp, None)
+                logger.exception("Could not queue recording %s", chunk.timestamp)
+                if enrollment:
+                    setup_service.fail(chunk.timestamp, "Could not queue the recording. Please send it again.")
+                raise HTTPException(status_code=503, detail="Could not queue the recording. Please retry.") from exc
             del recordings[chunk.timestamp]
-            Thread(target=process_recording,
-                   args=(recording.complete, chunk.timestamp, enrollment), daemon=True).start()
 
-    return {"message": f"received : {len(chunk.data)}"}
+    return {"message": f"received : {len(chunk.data)}", "recordingComplete": complete}
