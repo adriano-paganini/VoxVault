@@ -115,7 +115,8 @@ class ListeningService : Service() {
         val pendingIntent: PendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, AppConfig.UI.NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher) // TODO: Use a proper icon
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(ContextCompat.getColor(this, R.color.vault_primary))
             .setContentTitle("VoxVault")
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_LOW)

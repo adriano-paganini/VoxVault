@@ -54,6 +54,18 @@ p {
   gap: 24px;
   align-items: center;
 }
+.brand-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.brand-icon {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex: 0 0 56px;
+}
 #connection-status {
   font-size: 13px;
   color: #28704d;
@@ -427,6 +439,11 @@ footer {
   }
   .view-heading {
     display: block;
+  }
+  .brand-icon {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
   }
   #connection-status {
     display: block;

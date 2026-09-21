@@ -16,6 +16,12 @@
             style="@style/VoxVault.IconButton"
             android:src="?attr/homeAsUpIndicator"
             android:contentDescription="@string/back" />
+        <ImageView
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/voxvault_icon" />
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"

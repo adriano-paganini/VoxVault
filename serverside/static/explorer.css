@@ -11,6 +11,7 @@
 #delete-confirmation .inline-actions { justify-content: flex-end; }
 .explorer-shell { width: min(1360px, calc(100% - 64px)); padding: 28px 0; }
 .explorer-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.explorer-heading .brand-heading { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .explorer-heading h1 { font-size: 30px; }
 .explorer-heading p { font-size: 15px; color: #58676b; margin: 6px 0 0; }
 .explorer-heading a { display: inline-flex; align-items: center; gap: 8px; color: #176b87; font-size: 14px; text-decoration: none; padding: 10px 0; }

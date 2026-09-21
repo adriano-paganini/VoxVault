@@ -16,6 +16,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.paganini.voxvault.BackendUrl
 import com.paganini.voxvault.MainActivity
+import com.paganini.voxvault.R
 import com.paganini.voxvault.SettingsManager
 import com.paganini.voxvault.dataStore
 import com.paganini.voxvault.upload.SequentialUploader
@@ -176,7 +177,8 @@ class UploadService : Service() {
         val content = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(ContextCompat.getColor(this, R.color.vault_primary))
             .setContentTitle(if (finished) "Recording uploads" else "Uploading recording")
             .setContentText(serviceError ?: entry?.description() ?: "Preparing uploads")
             .setContentIntent(content)
