@@ -2,4 +2,5 @@
     android:antialias="true"
     android:filter="true"
     android:gravity="fill"
+    android:tint="@color/vault_logo"
     android:src="@drawable/voxvault_icon_adaptive" />

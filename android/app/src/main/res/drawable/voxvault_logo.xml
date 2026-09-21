@@ -5,6 +5,6 @@
             android:src="@drawable/voxvault_icon"
             android:gravity="fill"
             android:filter="true"
-            android:tint="@android:color/white" />
+            android:tint="@color/vault_logo" />
     </item>
 </layer-list>

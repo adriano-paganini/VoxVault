@@ -18,6 +18,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.view.ViewCompat
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.appbar.MaterialToolbar
@@ -51,6 +52,7 @@ class ExplorerActivity : AppCompatActivity() {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
         webView = findViewById(R.id.archiveWebView)
+        webView.setBackgroundColor(ContextCompat.getColor(this, R.color.vault_surface))
         webView.settings.apply {
             javaScriptEnabled = true
             allowFileAccess = false
