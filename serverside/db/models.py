@@ -3,11 +3,16 @@ from __future__ import annotations
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Double,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     Text,
+    func,
+    literal_column,
+    or_,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -79,6 +84,9 @@ class SetupState(Base):
     person_id: Mapped[int | None] = mapped_column(ForeignKey("person.id"))
     error: Mapped[str | None] = mapped_column(Text)
     history: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    expected_languages: Mapped[list[str]] = mapped_column(
+        JSON, default=lambda: ["en"], server_default='["en"]',
+    )
 
 
 class TranscriptionChunk(Base):
@@ -89,11 +97,11 @@ class TranscriptionChunk(Base):
     )
 
     recording_id: Mapped[int] = mapped_column(
-        ForeignKey("recording.id")
+        ForeignKey("recording.id"), index=True,
     )
 
     person_id: Mapped[int | None] = mapped_column(
-        ForeignKey("person.id")
+        ForeignKey("person.id"), index=True,
     )
 
     chunk_index: Mapped[int] = mapped_column(Integer)
@@ -135,7 +143,7 @@ class TranscriptionWord(Base):
     )
 
     chunk_id: Mapped[int] = mapped_column(
-        ForeignKey("transcription_chunk.id")
+        ForeignKey("transcription_chunk.id"), index=True,
     )
 
     word_index: Mapped[int] = mapped_column(Integer)
@@ -149,6 +157,32 @@ class TranscriptionWord(Base):
 
     confidence: Mapped[float | None] = mapped_column(Double)
 
+    is_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     chunk: Mapped[TranscriptionChunk] = relationship(
         back_populates="words"
     )
+
+
+Index(
+    "ix_chunk_text_hnsw", TranscriptionChunk.text_embedding,
+    postgresql_using="hnsw", postgresql_ops={"text_embedding": "vector_cosine_ops"},
+).ddl_if(dialect="postgresql")
+Index(
+    "ix_person_voice_hnsw", Person.voice_embedding,
+    postgresql_using="hnsw", postgresql_ops={"voice_embedding": "vector_cosine_ops"},
+).ddl_if(dialect="postgresql")
+Index(
+    "ix_chunk_voice_hnsw", TranscriptionChunk.voice_embedding,
+    postgresql_using="hnsw", postgresql_ops={"voice_embedding": "vector_cosine_ops"},
+).ddl_if(dialect="postgresql")
+Index(
+    "ix_chunk_recording_timeline", TranscriptionChunk.recording_id,
+    TranscriptionChunk.start_ms, TranscriptionChunk.chunk_index, TranscriptionChunk.id,
+)
+_person_name_index_expression = func.lower(func.coalesce(Person.name, literal_column("''"))).collate("C")
+Index("ix_person_name_order", _person_name_index_expression, Person.id).ddl_if(dialect="postgresql")
+Index(
+    "ix_person_missing_voice_name", _person_name_index_expression, Person.id,
+    postgresql_where=or_(Person.voice_embedding.is_(None), Person.voice_embedding.max_inner_product(Person.voice_embedding) == 0),
+).ddl_if(dialect="postgresql")

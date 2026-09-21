@@ -2,4 +2,11 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="vault_primary">#176B87</color>
+    <color name="vault_on_primary">#FFFFFF</color>
+    <color name="vault_secondary">#28704D</color>
+    <color name="vault_primary_container">#DCEFF5</color>
+    <color name="vault_surface">#F7F9FA</color>
+    <color name="vault_on_surface">#20292E</color>
+    <color name="vault_outline">#BCC9CE</color>
 </resources>

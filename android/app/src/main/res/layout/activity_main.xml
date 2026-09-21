@@ -1,156 +1,186 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="?android:attr/windowBackground"
-    android:fitsSystemWindows="true">
+    android:orientation="vertical">
 
-    <!-- Page Title -->
-    <TextView
-        android:id="@+id/pageTitle"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="24dp"
-        android:layout_marginTop="24dp"
-        android:text="@string/recordings_title"
-        android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
-        android:textStyle="bold"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <ImageButton
-        android:id="@+id/settingsButton"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:layout_marginTop="24dp"
-        android:layout_marginEnd="24dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="@string/settings_title"
-        android:src="@android:drawable/ic_menu_preferences"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
-
-    <!-- Action Bar: Select All | Spacer | Upload | Delete -->
     <LinearLayout
-        android:id="@+id/controlBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="8dp">
+        <ImageView
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginEnd="10dp"
+            android:contentDescription="@null"
+            android:scaleType="fitCenter"
+            android:src="@drawable/voxvault_icon" />
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/app_name"
+            android:textAppearance="@style/TextAppearance.Material3.HeadlineSmall"
+            android:textStyle="bold" />
+        <ImageButton
+            android:id="@+id/settingsButton"
+            style="@style/VoxVault.IconButton"
+            android:contentDescription="@string/settings_title"
+            android:src="@android:drawable/ic_menu_preferences" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/recordings_title"
+            android:textAppearance="@style/TextAppearance.Material3.TitleLarge" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/archiveButton"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/archive_title"
+            app:icon="@android:drawable/ic_menu_agenda" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/recordingSummary"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="8dp"
+        android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+        android:textColor="?android:attr/textColorSecondary" />
+
+    <com.google.android.material.button.MaterialButtonToggleGroup
+        android:id="@+id/sortGroup"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginHorizontal="16dp"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/bar_background"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        app:layout_constraintTop_toBottomOf="@id/pageTitle">
-
-        <Button
-            android:id="@+id/selectAll"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/select_all"
-            android:textSize="12sp" />
-
-        <View
+        app:singleSelection="true"
+        app:selectionRequired="true"
+        app:checkedButton="@id/sortByDate">
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sortByDate"
+            style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <Button
-            android:id="@+id/uploadButton"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/upload"
-            android:textSize="12sp" />
-
-        <Button
-            android:id="@+id/deleteButton"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/newest_first" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/sortByDuration"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/delete"
-            android:textColor="?attr/colorError"
-            android:textSize="12sp" />
-    </LinearLayout>
+            android:layout_weight="1"
+            android:text="@string/longest_first" />
+    </com.google.android.material.button.MaterialButtonToggleGroup>
 
     <LinearLayout
-        android:id="@+id/sortBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginHorizontal="24dp"
-        android:layout_marginTop="4dp"
-        android:gravity="center_vertical"
-        android:orientation="horizontal"
-        app:layout_constraintTop_toBottomOf="@id/controlBar">
-
-        <TextView
-            android:layout_width="wrap_content"
+        android:paddingHorizontal="12dp"
+        android:gravity="center_vertical">
+        <CheckBox
+            android:id="@+id/selectAll"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/sort_by"
-            android:textSize="12sp"
-            android:layout_marginEnd="4dp"/>
-
-        <Button
-            android:id="@+id/sortByDate"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/date"
-            android:padding="0dp"
-            android:textSize="12sp" />
-
-        <Button
-            android:id="@+id/sortByDuration"
-            style="@style/Widget.Material3.Button.TextButton"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/duration"
-            android:padding="0dp"
-            android:textSize="12sp" />
+            android:minHeight="48dp"
+            android:layout_weight="1"
+            android:text="@string/select_all" />
+        <ImageButton
+            android:id="@+id/uploadButton"
+            style="@style/VoxVault.IconButton"
+            android:contentDescription="@string/upload"
+            android:src="@android:drawable/ic_menu_upload" />
+        <ImageButton
+            android:id="@+id/cancelUploadsButton"
+            style="@style/VoxVault.IconButton"
+            android:contentDescription="@string/cancel_uploads"
+            android:visibility="gone"
+            android:src="@android:drawable/ic_menu_close_clear_cancel" />
+        <ImageButton
+            android:id="@+id/deleteButton"
+            style="@style/VoxVault.IconButton"
+            android:contentDescription="@string/delete"
+            android:src="@android:drawable/ic_menu_delete"
+            app:tint="?attr/colorError" />
     </LinearLayout>
 
-    <!-- Recordings Container -->
-    <ScrollView
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/deleteUploadedButton"
+        style="@style/Widget.Material3.Button.OutlinedButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="8dp"
+        android:minHeight="48dp"
+        android:enabled="false"
+        android:text="@string/delete_uploaded_title"
+        app:icon="@android:drawable/ic_menu_delete"
+        app:iconGravity="textStart" />
+
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_marginTop="4dp"
-        android:clipToPadding="false"
-        android:paddingHorizontal="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/sortBar">
-
-        <LinearLayout
-            android:id="@+id/recordingLinearLayout"
+        android:layout_weight="1">
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingHorizontal="16dp">
+            <LinearLayout
+                android:id="@+id/recordingLinearLayout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="8dp" />
+        </ScrollView>
+        <TextView
+            android:id="@+id/emptyRecordings"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingBottom="100dp" />
-    </ScrollView>
+            android:layout_gravity="center"
+            android:gravity="center"
+            android:padding="24dp"
+            android:text="@string/no_recordings"
+            android:textAppearance="@style/TextAppearance.Material3.BodyLarge"
+            android:textColor="?android:attr/textColorSecondary"
+            android:visibility="gone" />
+    </FrameLayout>
 
-    <!-- Floating Start/Stop Button -->
-    <androidx.cardview.widget.CardView
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_margin="24dp"
-        app:cardCornerRadius="35dp"
-        app:cardElevation="8dp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <ToggleButton
+        android:orientation="vertical"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="8dp">
+        <TextView
+            android:id="@+id/listeningStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:text="@string/listening_idle"
+            android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+            android:accessibilityLiveRegion="polite" />
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/listeningToggle"
-            android:layout_width="70dp"
-            android:layout_height="70dp"
-            android:background="@drawable/circular_toggle_bg"
-            android:textOff="@string/listening_off"
-            android:textOn="@string/listening_on"
-            android:textColor="@android:color/white"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-    </androidx.cardview.widget.CardView>
-
-</androidx.constraintlayout.widget.ConstraintLayout>
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:text="@string/listening_off"
+            app:icon="@android:drawable/ic_btn_speak_now"
+            app:iconGravity="textStart" />
+    </LinearLayout>
+</LinearLayout>

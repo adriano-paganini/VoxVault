@@ -2,9 +2,13 @@ package com.paganini.voxvault
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.enableEdgeToEdge
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -18,7 +22,13 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContentView(R.layout.activity_settings)
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.settingsRoot)) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
 
         settingsManager = SettingsManager(this)
 
@@ -33,7 +43,7 @@ class SettingsActivity : AppCompatActivity() {
         val encryptionPublicKeyLayout = findViewById<TextInputLayout>(R.id.encryptionPublicKeyLayout)
         
         val saveButton = findViewById<Button>(R.id.saveButton)
-        val backButton = findViewById<Button>(R.id.backButton)
+        val backButton = findViewById<View>(R.id.backButton)
 
         lifecycleScope.launch {
             backendUrlEdit.setText(settingsManager.backendUrlFlow.first())
@@ -50,8 +60,8 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         saveButton.setOnClickListener {
-            val backendUrl = backendUrlEdit.text.toString()
-            val backendPort = backendPortEdit.text.toString()
+            val backendUrl = backendUrlEdit.text.toString().trim()
+            val backendPort = backendPortEdit.text.toString().trim()
             
             val maxSilenceSec = maxSilenceEdit.text.toString().toDoubleOrNull() ?: 0.0
             val preBufferSec = preBufferEdit.text.toString().toDoubleOrNull() ?: 0.0
@@ -59,6 +69,16 @@ class SettingsActivity : AppCompatActivity() {
             val encryptionKey = encryptionPublicKeyEdit.text.toString()
 
             var isValid = true
+            val backendUrlLayout = findViewById<TextInputLayout>(R.id.backendUrlLayout)
+            backendUrlLayout.error = null
+            if (backendUrl.isNotEmpty()) {
+                try {
+                    BackendUrl.resolve(backendUrl, backendPort, "ui/explorer")
+                } catch (_: Exception) {
+                    backendUrlLayout.error = getString(R.string.invalid_server_address)
+                    isValid = false
+                }
+            }
 
             if (maxSilenceSec < 0.5) {
                 maxSilenceLayout.error = "Must be at least 0.5 seconds"
@@ -101,6 +121,10 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun navigateToMain() {
+        if (!isTaskRoot) {
+            finish()
+            return
+        }
         val intent = Intent(this, MainActivity::class.java)
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         startActivity(intent)

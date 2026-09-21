@@ -25,3 +25,4 @@ htmlcov/
 /build/
 /dist/
 *.egg-info/
+voxvault-processing-*/

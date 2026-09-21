@@ -115,7 +115,8 @@ class ListeningService : Service() {
         val pendingIntent: PendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 
         return NotificationCompat.Builder(this, AppConfig.UI.NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher) // TODO: Use a proper icon
+            .setSmallIcon(R.drawable.ic_notification)
+            .setColor(ContextCompat.getColor(this, R.color.vault_primary))
             .setContentTitle("VoxVault")
             .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -202,6 +203,7 @@ class ListeningService : Service() {
         var silenceDuration = 0
         var recordingState = 0
         var recordingDuration = 0
+        var totalSpeechOccurrences = 0
         while (isListening) {
             val readResult = audioListener?.read(audioBuffer, 0, audioBuffer.size)
             if (readResult != null && readResult > 0) {
@@ -217,9 +219,11 @@ class ListeningService : Service() {
                 val isSpeech = vad?.isSpeech(vadBuffer) ?: false
 
                 if (isSpeech) {
+                    if (recordingState != 0) totalSpeechOccurrences++
                     if (recordingState == 0) {
                         recordingState = 1
                         silenceDuration = 0
+                        totalSpeechOccurrences = 1 // Count the first frame that triggered the recording
 
                         writeRingBufferToFile()
 
@@ -253,8 +257,6 @@ class ListeningService : Service() {
                 }
 
                 if (silenceDuration >= AppConfig.Audio.RECORDING_MAX_SILENCE) {
-                    completeMetadata()
-
                     recordingState = 0
                     silenceDuration = 0
                     recordingDuration = 0
@@ -269,6 +271,18 @@ class ListeningService : Service() {
 
                     sharedSpeaking = 0
                     speakingListener?.invoke()
+
+                    val speechDurationMs = totalSpeechOccurrences * AppConfig.Audio.MS_PER_FRAME
+                    if (speechDurationMs < AppConfig.Audio.RECORDING_MINIMAL_SPEECH_DURATION_MS) {
+                        val directory = currentFile?.parentFile
+                        if (directory != null && directory.exists()) {
+                            directory.listFiles()?.forEach { it.delete() }
+                            directory.delete()
+                        }
+                    } else {
+                        completeMetadata()
+                    }
+                    totalSpeechOccurrences = 0
                 }
             }
         }

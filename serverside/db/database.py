@@ -26,8 +26,15 @@ def initialize_database() -> None:
         try:
             with engine.begin() as connection:
                 connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-
-            Base.metadata.create_all(bind=engine)
+                Base.metadata.create_all(bind=connection)
+                table = Base.metadata.tables["transcription_word"]
+                schema = connection.schema_for_object(table)
+                quote = connection.dialect.identifier_preparer.quote
+                table_name = f"{quote(schema)}.{quote(table.name)}" if schema else quote(table.name)
+                connection.execute(text(
+                    f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS "
+                    "is_edited BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
             return
         except OperationalError:
             if attempt == retries:

@@ -1,62 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginBottom="8dp"
-    app:cardCornerRadius="12dp"
-    app:cardElevation="2dp">
-
+    app:cardCornerRadius="6dp"
+    app:cardElevation="0dp"
+    app:strokeWidth="1dp"
+    app:strokeColor="?attr/colorOutline">
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
-
         <View
             android:id="@+id/uploadProgressBar"
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:background="#4CAF50"
-            android:alpha="0.3" />
-
+            android:background="?attr/colorPrimary"
+            android:alpha="0.15" />
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="20dp"
-            android:paddingVertical="12dp">
-
+            android:padding="12dp">
             <CheckBox
                 android:id="@+id/recordingCheckbox"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="12dp" />
-
-            <TextView
-                android:id="@+id/recordingDate"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/recordingDuration"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="@string/select_recording" />
+            <LinearLayout
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:gravity="center"
-                android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                android:textColor="?android:attr/textColorSecondary" />
-
+                android:orientation="vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="12dp">
+                <TextView
+                    android:id="@+id/recordingDate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleSmall" />
+                <TextView
+                    android:id="@+id/recordingTime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="?android:attr/textColorSecondary" />
+                <TextView
+                    android:id="@+id/uploadStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:visibility="gone"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:accessibilityLiveRegion="polite" />
+            </LinearLayout>
             <TextView
-                android:id="@+id/recordingTime"
+                android:id="@+id/recordingDuration"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
                 android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
-                android:textColor="?attr/colorPrimary"
-                android:textStyle="bold" />
-
+                android:textColor="?attr/colorPrimary" />
         </LinearLayout>
     </FrameLayout>
-</androidx.cardview.widget.CardView>
+</com.google.android.material.card.MaterialCardView>
