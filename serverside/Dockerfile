@@ -1,22 +1,11 @@
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
-WORKDIR /build
-
-COPY requirements.txt .
-
-RUN pip install \
-    --prefix=/install \
-    --no-cache-dir \
-    -r requirements.txt
-
-
-FROM python:3.12-slim AS runtime
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_NO_CACHE_DIR=1
+ENV HF_HOME=/app/models/huggingface
+ENV TORCH_HOME=/app/models/torch
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
@@ -24,10 +13,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /install /usr/local
+COPY requirements.txt .
 
-ENV HF_HOME=/app/models/huggingface
-ENV TORCH_HOME=/app/models/torch
+RUN pip install -r requirements.txt \
+    && pip check
 
 COPY db ./db
 COPY static ./static

@@ -1,3 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# CPU inference stack. The +cpu pins prevent pip from selecting CUDA wheels.
+torch==2.8.0+cpu
+torchaudio==2.8.0+cpu
+torchvision==0.23.0+cpu
+
 fastapi
 pydantic
 uvicorn[standard]
@@ -8,11 +15,12 @@ tink
 sqlalchemy
 psycopg[binary]
 pgvector
-whisperx
-# find at:
-# https://huggingface.co/pyannote/speaker-diarization-community-1
-# HUGGINGFACE READ API-TOKEN is required!
-pyannote.audio
-speechbrain
-sentence-transformers
-torchaudio
+
+# Runtime inference libraries. Models are downloaded lazily into /app/models.
+whisperx==3.8.6
+speechbrain==1.1.1
+sentence-transformers==5.7.0
+
+# Keep shared inference dependencies compatible and avoid resolver backtracking.
+transformers==4.57.6
+triton==3.4.0; sys_platform == "linux" and platform_machine == "x86_64"
