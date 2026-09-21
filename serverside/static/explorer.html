@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Conversations | VoxVault</title>
     <link rel="stylesheet" href="/static/style.css?v=7" />
-    <link rel="stylesheet" href="/static/explorer.css?v=6" />
+    <link rel="stylesheet" href="/static/explorer.css?v=7" />
   </head>
   <body class="explorer">
     <main class="shell explorer-shell">
@@ -67,6 +67,7 @@
       <div class="inspector-body">
         <p id="inspector-error" class="notice error hidden" role="alert"></p>
         <p id="inspector-status" class="operation-status" role="status" aria-live="polite"></p>
+        <button id="discard-transcripts" class="secondary compact hidden" type="button"><img src="/static/icons/x.svg" alt="" />Discard corrections</button>
         <section id="selected-chunk-section" class="selected-chunk hidden" aria-labelledby="selected-chunk-title"><div class="section-heading"><h3 id="selected-chunk-title">Selected chunk</h3><button id="clear-chunk" class="secondary compact" type="button"><img src="/static/icons/x.svg" alt="" />Clear selection</button></div><div id="selected-chunk"></div></section>
         <div class="inspector-columns">
           <aside class="person-sidebar" aria-label="Person comparison">
@@ -101,6 +102,6 @@
         <button class="danger" value="delete"><img src="/static/icons/trash-2.svg" alt="" />Delete chunk</button>
       </form>
     </dialog>
-    <script src="/static/explorer.js?v=6" defer></script>
+    <script src="/static/explorer.js?v=7" defer></script>
   </body>
 </html>

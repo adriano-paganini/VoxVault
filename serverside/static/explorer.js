@@ -14,6 +14,8 @@
   };
   const epochs = { search: 0, people: 0, chunk: 0, person: 0, known: 0, candidates: 0, conversations: 0, conversation: 0, speaker: 0 };
   let pendingDeletion = null;
+  const transcriptEdits = new Map();
+  let renderedUrl = location.href;
   if (new URLSearchParams(location.search).get("app") === "1") document.body.classList.add("in-app");
 
   function element(tag, className, text) {
@@ -104,35 +106,171 @@
     return element("span", `association ${candidate ? "candidate" : ""}`, candidate ? "Candidate / unassigned" : "Unassigned");
   }
 
-  function transcript(chunk) {
-    const paragraph = element("p", "transcript");
+  function draftChunk(chunk) {
+    const draft = transcriptEdits.get(chunk.id);
+    return draft ? { ...chunk, text: draft.text, words: draft.words, wordCount: draft.wordCount } : chunk;
+  }
+
+  function wordParts(chunk) {
+    const parts = [];
     const text = chunk.text || "";
-    if (!text) return element("p", "transcript muted", "No transcript available.");
     let cursor = 0;
-    let matched = false;
-    // Locate aligned words in the original transcript so punctuation and spacing survive.
+    const gap = (end) => {
+      for (const match of text.slice(cursor, end).matchAll(/\S+/gu)) {
+        parts.push({ word: match[0], start: cursor + match.index, end: cursor + match.index + match[0].length });
+      }
+    };
     for (const word of chunk.words || []) {
       const spoken = String(word.word || "").trim();
       if (!spoken) continue;
-      const position = text.indexOf(spoken, cursor);
-      if (position < 0) continue;
-      if (position > cursor) paragraph.append(document.createTextNode(text.slice(cursor, position)));
-      const confidence = finite(word.confidence) ? word.confidence : null;
-      const level = confidence === null ? "unknown" : confidence >= 0.9 ? "high" : confidence >= 0.6 ? "medium" : "low";
-      const wordNode = element("mark", `word confidence-${level}`, text.slice(position, position + spoken.length));
-      const description = confidence === null ? "Confidence unknown" : `${(confidence * 100).toFixed(1)}% transcription confidence`;
-      wordNode.title = `${spoken}: ${description}${finite(word.startMs) ? `; ${timecode(word.startMs)}` : ""}${word.speakerLabel ? `; speaker ${word.speakerLabel}` : ""}`;
-      wordNode.setAttribute("aria-label", `${spoken}, ${description}`);
+      const start = text.indexOf(spoken, cursor);
+      if (start < 0) continue;
+      gap(start);
+      parts.push({ ...word, word: spoken, start, end: start + spoken.length });
+      cursor = start + spoken.length;
+    }
+    gap(text.length);
+    return parts;
+  }
+
+  function transcript(chunk, { editable = false, confidence = true, query = "" } = {}) {
+    if (editable) chunk = draftChunk(chunk);
+    const paragraph = element("p", "transcript");
+    const text = chunk.text || "";
+    if (!text) return element("p", "transcript muted", "No transcript available.");
+    const parts = wordParts(chunk);
+    const matches = [];
+    if (query) {
+      let start = 0;
+      let index;
+      while ((index = text.toLocaleLowerCase().indexOf(query.toLocaleLowerCase(), start)) !== -1) {
+        matches.push([index, index + query.length]);
+        start = index + query.length;
+      }
+    }
+    const appendText = (node, start, end) => {
+      for (const [left, right] of matches) {
+        if (right <= start || left >= end) continue;
+        const from = Math.max(start, left), to = Math.min(end, right);
+        node.append(document.createTextNode(text.slice(start, from)), element("mark", "text-match", text.slice(from, to)));
+        start = to;
+      }
+      node.append(document.createTextNode(text.slice(start, end)));
+    };
+    let cursor = 0;
+    for (const word of parts) {
+      appendText(paragraph, cursor, word.start);
+      const certainty = finite(word.confidence) ? word.confidence : null;
+      const level = certainty === null ? "unknown" : certainty >= 0.9 ? "high" : certainty >= 0.6 ? "medium" : "low";
+      const wordNode = element("mark", `word${confidence ? ` confidence-${level}` : ""}${word.isEdited ? " word-edited" : ""}`);
+      appendText(wordNode, word.start, word.end);
+      const description = word.isEdited ? "Edited" : certainty === null ? "Confidence unknown" : `${(certainty * 100).toFixed(1)}% transcription confidence`;
+      wordNode.title = `${word.word}: ${description}${finite(word.startMs) ? `; ${timecode(word.startMs)}` : ""}${word.speakerLabel ? `; speaker ${word.speakerLabel}` : ""}`;
+      wordNode.setAttribute("aria-label", `${word.word}, ${description}`);
+      if (editable) {
+        wordNode.dataset.start = word.start;
+        wordNode.dataset.end = word.end;
+        wordNode.tabIndex = 0;
+        wordNode.setAttribute("role", "button");
+        wordNode.setAttribute("aria-pressed", "false");
+      }
       paragraph.append(wordNode);
-      cursor = position + spoken.length;
-      matched = true;
+      cursor = word.end;
     }
-    if (cursor < text.length) {
-      const remainder = element("span", matched ? "" : "word confidence-unknown", text.slice(cursor));
-      if (!matched) remainder.title = "Word confidence unavailable";
-      paragraph.append(remainder);
-    }
-    return paragraph;
+    appendText(paragraph, cursor, text.length);
+    if (!editable) return paragraph;
+
+    const editor = element("div", "transcript-editor");
+    editor.dataset.chunkId = chunk.id;
+    const form = element("form", "word-replacement hidden");
+    const label = element("label", "", "Replacement");
+    const input = element("input");
+    input.type = "text";
+    input.maxLength = 2000;
+    input.required = true;
+    input.setAttribute("aria-label", "Replacement words");
+    input.addEventListener("input", () => input.setCustomValidity(""));
+    label.append(input);
+    let selected = null;
+    const select = (start, end) => {
+      if (state.busy) return;
+      selected = { start, end };
+      for (const mark of paragraph.querySelectorAll("[data-start]")) {
+        const active = Number(mark.dataset.start) >= start && Number(mark.dataset.end) <= end;
+        mark.classList.toggle("word-selected", active);
+        mark.setAttribute("aria-pressed", String(active));
+      }
+      input.value = text.slice(start, end);
+      input.defaultValue = input.value;
+      form.classList.remove("hidden");
+    };
+    paragraph.addEventListener("click", event => {
+      const mark = event.target.closest("[data-start]");
+      const selection = window.getSelection();
+      if (!mark || !selection.isCollapsed) return;
+      const start = Number(mark.dataset.start), end = Number(mark.dataset.end);
+      select(event.shiftKey && selected ? Math.min(selected.start, start) : start,
+        event.shiftKey && selected ? Math.max(selected.end, end) : end);
+    });
+    paragraph.addEventListener("pointerup", () => {
+      const selection = window.getSelection();
+      if (!selection.rangeCount || selection.isCollapsed || !paragraph.contains(selection.anchorNode) || !paragraph.contains(selection.focusNode)) return;
+      const range = selection.getRangeAt(0);
+      const marks = [...paragraph.querySelectorAll("[data-start]")].filter(mark => range.intersectsNode(mark));
+      if (marks.length) select(Number(marks[0].dataset.start), Number(marks.at(-1).dataset.end));
+    });
+    paragraph.addEventListener("keydown", event => {
+      if (!["Enter", " "].includes(event.key) || !event.target.matches("[data-start]")) return;
+      event.preventDefault();
+      const mark = event.target;
+      const start = Number(mark.dataset.start), end = Number(mark.dataset.end);
+      select(event.shiftKey && selected ? Math.min(selected.start, start) : start,
+        event.shiftKey && selected ? Math.max(selected.end, end) : end);
+      input.focus();
+    });
+    const apply = () => {
+      if (!selected || form.classList.contains("hidden")) return true;
+      const replacement = input.value.trim();
+      if (!replacement) { input.setCustomValidity("Enter replacement words."); input.focus(); input.reportValidity(); return false; }
+      const { start, end } = selected;
+      if (text.slice(start, end) === replacement) { form.classList.add("hidden"); return true; }
+      const draft = transcriptEdits.get(chunk.id) || { originalText: text, replacements: [] };
+      const affected = parts.filter(word => word.end > start && word.start < end);
+      const timed = affected.filter(word => finite(word.startMs) && finite(word.endMs));
+      const words = replacement.match(/\S+/gu).map(word => ({
+        word, isEdited: true, confidence: null, speakerLabel: affected[0]?.speakerLabel,
+        startMs: timed.length ? Math.min(...timed.map(word => word.startMs)) : chunk.startMs,
+        endMs: timed.length ? Math.max(...timed.map(word => word.endMs)) : chunk.endMs,
+      }));
+      draft.text = text.slice(0, start) + replacement + text.slice(end);
+      draft.words = [...parts.filter(word => word.end <= start), ...words, ...parts.filter(word => word.start >= end)];
+      draft.wordCount = (draft.text.match(/\S+/gu) || []).length;
+      // API offsets count Unicode code points, while browser selections use UTF-16.
+      draft.replacements.push({ start: [...text.slice(0, start)].length, end: [...text.slice(0, end)].length, text: replacement });
+      transcriptEdits.set(chunk.id, draft);
+      for (const node of document.querySelectorAll(`.transcript-editor[data-chunk-id="${chunk.id}"]`)) {
+        node.replaceWith(transcript(chunk, { editable: true }));
+      }
+      $("#inspector-status").textContent = `${count(transcriptEdits.size, "edited chunk")} pending`;
+      $("#discard-transcripts").classList.remove("hidden");
+      return true;
+    };
+    editor.applyReplacement = apply;
+    form.addEventListener("submit", event => { event.preventDefault(); if (!state.busy) apply(); });
+    const replace = button("", "check", () => {}, "icon-button");
+    replace.type = "submit";
+    replace.title = "Replace selected words";
+    replace.setAttribute("aria-label", replace.title);
+    const cancel = button("", "x", () => {
+      selected = null;
+      form.classList.add("hidden");
+      paragraph.querySelectorAll(".word-selected").forEach(mark => { mark.classList.remove("word-selected"); mark.setAttribute("aria-pressed", "false"); });
+    }, "icon-button secondary");
+    cancel.title = "Cancel word replacement";
+    cancel.setAttribute("aria-label", cancel.title);
+    form.append(label, replace, cancel);
+    editor.append(paragraph, form);
+    return editor;
   }
 
   function metadata(chunk) {
@@ -155,6 +293,7 @@
   }
 
   function chunkContent(chunk, { candidate = false, inspect = true, search = false, framed = true } = {}) {
+    chunk = draftChunk(chunk);
     const card = element("article", framed ? "chunk-card" : "chunk-content");
     card.dataset.chunkId = chunk.id;
     const top = element("div", "chunk-top");
@@ -162,17 +301,16 @@
     identity.append(element("span", "chunk-id", `Chunk #${chunk.id}`), element("span", "", timestamp(chunk.recordingTimestamp)), association(chunk, candidate));
     top.append(identity);
     if (finite(chunk.similarity)) top.append(score(chunk.similarity, search ? "Text cosine similarity" : "Voice cosine similarity"));
-    card.append(top, transcript(chunk));
+    card.append(top, transcript(chunk, { editable: true }));
     const bottom = element("div", "chunk-bottom");
     bottom.append(metadata(chunk));
     const actions = element("div", "inline-actions");
     if (inspect) {
       const inspectButton = button("Inspect voice", "audio-lines", () => inspectChunk(chunk.id, { retainPerson: $("#inspector").open }));
-      inspectButton.disabled = !chunk.hasVoiceEmbedding;
-      if (!chunk.hasVoiceEmbedding) inspectButton.title = "No voice embedding is available for this chunk";
+      inspectButton.disabled = state.busy;
       actions.append(inspectButton);
-      actions.append(button("Full conversation", "arrow-right", () => {
-        $("#inspector").close();
+      actions.append(button("Full conversation", "arrow-right", async () => {
+        if (!await closeInspector()) return;
         navigate("conversation", { id: chunk.recordingId, chunk: chunk.id, from: state.view });
       }));
     }
@@ -300,26 +438,13 @@
     speaker.disabled = state.busy;
     top.append(speaker, element("span", "muted", `${timecode(chunk.startMs)} - ${timecode(chunk.endMs)}`));
     if (chunk.matched) top.append(element("span", `match-count ${primary ? "primary-match" : "secondary-match"}`, primary ? "Keyword match" : "Related match"));
-    const body = element("p", "transcript", chunk.text || "No transcript available.");
-    if (primary && state.context.q) {
-      body.replaceChildren();
-      const source = chunk.text || "";
-      const query = state.context.q.toLocaleLowerCase();
-      let start = 0;
-      let index;
-      while ((index = source.toLocaleLowerCase().indexOf(query, start)) !== -1) {
-        body.append(document.createTextNode(source.slice(start, index)), element("mark", "text-match", source.slice(index, index + query.length)));
-        start = index + query.length;
-      }
-      body.append(document.createTextNode(source.slice(start)));
-    }
+    const body = transcript(chunk, { confidence: false, query: primary ? state.context.q : "" });
     const actions = element("div", "inline-actions");
     const inspect = button("", "audio-lines", () => inspectChunk(chunk.id), "icon-button secondary");
     inspect.title = "Inspect voice";
     inspect.setAttribute("aria-label", inspect.title);
     inspect.dataset.mutation = "";
-    inspect.dataset.unavailable = String(!chunk.hasVoiceEmbedding);
-    inspect.disabled = !chunk.hasVoiceEmbedding || state.busy;
+    inspect.disabled = state.busy;
     const remove = button("", "trash-2", () => confirmDeletion(chunk), "icon-button secondary danger-icon");
     remove.title = `Delete chunk #${chunk.id}`;
     remove.setAttribute("aria-label", remove.title);
@@ -570,8 +695,35 @@
     if (!$("#inspector").open) $("#inspector").showModal();
   }
 
+  function applyPendingReplacements() {
+    for (const editor of document.querySelectorAll(".transcript-editor")) {
+      if (editor.isConnected && !editor.applyReplacement()) return false;
+    }
+    return true;
+  }
+
+  async function closeInspector() {
+    if (state.busy || !applyPendingReplacements()) return false;
+    if (transcriptEdits.size) {
+      const saved = await mutate(async () => {
+        $("#inspector-status").textContent = "Saving transcripts and updating text embeddings...";
+        await request("/transcripts", {
+          method: "PUT",
+          body: JSON.stringify({ chunks: [...transcriptEdits].map(([chunkId, draft]) => ({
+            chunkId, originalText: draft.originalText, replacements: draft.replacements,
+          })) }),
+        });
+        transcriptEdits.clear();
+        $("#discard-transcripts").classList.add("hidden");
+      }, "Transcripts saved. Text embeddings updated.");
+      if (!saved) return false;
+    }
+    $("#inspector").close();
+    return true;
+  }
+
   async function inspectChunk(id, { retainPerson = false } = {}) {
-    if (state.busy) return;
+    if (state.busy || !applyPendingReplacements()) return;
     const version = ++epochs.chunk;
     openInspector();
     $("#inspector-status").textContent = "Loading voice sample...";
@@ -690,7 +842,7 @@
   }
 
   async function mutate(callback, message) {
-    if (state.busy) return;
+    if (state.busy || !applyPendingReplacements()) return;
     state.busy = true;
     const inInspector = $("#inspector").open;
     const status = $($("#speaker-picker").open ? "#speaker-status" : inInspector ? "#inspector-status" : "#page-status");
@@ -698,10 +850,8 @@
     clearError(inInspector);
     status.textContent = "Saving changes...";
     document.querySelectorAll("button, input, select").forEach(node => {
-      if (node.id !== "close-inspector") {
-        node.dataset.preMutationDisabled = String(node.disabled);
-        node.disabled = true;
-      }
+      node.dataset.preMutationDisabled = String(node.disabled);
+      node.disabled = true;
     });
     let saved = false;
     try {
@@ -744,6 +894,7 @@
     if ($("#delete-confirmation").returnValue !== "delete" || id == null) return;
     mutate(async () => {
       await request(`/chunks/${id}`, { method: "DELETE" });
+      transcriptEdits.delete(id);
       if (state.chunk?.id === id) {
         state.chunk = null;
         state.source = "person";
@@ -777,6 +928,11 @@
   }
 
   async function renderRoute() {
+    if ($("#inspector").open && !await closeInspector()) {
+      history.replaceState(history.state, "", renderedUrl);
+      return;
+    }
+    renderedUrl = location.href;
     const route = new URLSearchParams(location.hash.slice(1));
     const view = ["search", "people", "conversation"].includes(route.get("view")) ? route.get("view") : "conversations";
     ++epochs.conversation;
@@ -813,6 +969,7 @@
     const dialogs = document.querySelectorAll("dialog[open]");
     if (dialogs.length) {
       const dialog = dialogs[dialogs.length - 1];
+      if (dialog.id === "inspector") { closeInspector(); return true; }
       dialog.returnValue = "cancel";
       dialog.close();
       return true;
@@ -823,6 +980,10 @@
     return true;
   };
   window.addEventListener("popstate", renderRoute);
+  window.addEventListener("beforeunload", event => {
+    const pending = [...document.querySelectorAll(".word-replacement:not(.hidden) input")].some(input => input.value !== input.defaultValue);
+    if (transcriptEdits.size || pending) { event.preventDefault(); event.returnValue = ""; }
+  });
   $("#conversations-tab").addEventListener("click", () => navigate("conversations"));
   $("#search-tab").addEventListener("click", () => navigate("search"));
   $("#people-tab").addEventListener("click", () => navigate("people"));
@@ -852,7 +1013,18 @@
   $("#search-assignment").addEventListener("change", () => $("#search-form").requestSubmit());
   $("#person-filter").addEventListener("input", renderPeople);
   $("#comparison-filter").addEventListener("input", renderComparison);
-  $("#close-inspector").addEventListener("click", () => $("#inspector").close());
+  $("#close-inspector").addEventListener("click", closeInspector);
+  $("#discard-transcripts").addEventListener("click", () => {
+    if (state.busy) return;
+    transcriptEdits.clear();
+    $("#discard-transcripts").classList.add("hidden");
+    clearError(true);
+    $("#inspector-status").textContent = "Transcript corrections discarded.";
+    renderSelectedChunk();
+    renderKnownChunk();
+    loadCandidates(state.candidateOffset);
+  });
+  $("#inspector").addEventListener("cancel", event => { event.preventDefault(); closeInspector(); });
   $("#inspector").addEventListener("close", () => {
     if (!state.busy) {
       for (const key of ["chunk", "person", "known", "candidates"]) ++epochs[key];

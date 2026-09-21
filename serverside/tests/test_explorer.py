@@ -185,6 +185,87 @@ class ExplorerTests(unittest.TestCase):
         person = self.get(f"persons/{person_id}")
         self.assertEqual((person["chunkCount"], person["recordingCount"], person["wordCount"]), (2, 2, 4))
 
+    def edit_transcripts(self, edits):
+        return self.client.put("/api/explorer/transcripts", json={"chunks": edits})
+
+    def test_word_corrections_persist_and_embed_updated_passages_only(self):
+        chunk_id = self.chunk(spoken="hello,  there!", confidences=[(0, "hello", 0.9), (1, "there", 0.8)])
+        untouched = self.chunk(spoken="keep these words")
+        person_id = self.person()
+        self.assign(chunk_id, person_id)
+        embedding = vector(0, 1, TEXT_EMBEDDING_DIM)
+        with patch("audio_processer.get_text_embedding_model") as model:
+            model.return_value.encode.return_value = np.asarray([embedding])
+            response = self.edit_transcripts([{
+                "chunkId": chunk_id, "originalText": "hello,  there!",
+                "replacements": [{"start": 8, "end": 13, "text": "dear friend"}],
+            }])
+            self.assertEqual(response.status_code, 200, response.text)
+            model.return_value.encode.assert_called_once_with(["passage: hello,  dear friend!"], normalize_embeddings=True)
+        result = self.get(f"chunks/{chunk_id}")
+        self.assertEqual(result["text"], "hello,  dear friend!")
+        self.assertEqual(result["wordCount"], 3)
+        self.assertEqual([word["word"] for word in result["words"]], ["hello", ",", "dear", "friend", "!"])
+        self.assertEqual([word["isEdited"] for word in result["words"]], [False, False, True, True, False])
+        self.assertEqual([word["index"] for word in result["words"]], list(range(5)))
+        self.assertEqual(result["words"][0]["confidence"], 0.9)
+        for word in result["words"][2:4]:
+            self.assertIsNone(word["confidence"])
+            self.assertEqual((word["startMs"], word["endMs"]), (100, 200))
+        with self.sessions() as session:
+            np.testing.assert_allclose(session.get(TranscriptionChunk, chunk_id).text_embedding, embedding)
+            np.testing.assert_allclose(session.get(TranscriptionChunk, untouched).text_embedding, vector(dimensions=TEXT_EMBEDDING_DIM))
+        self.assert_profile(person_id, vector(), 3)
+
+    def test_repeated_phrase_edits_support_unicode_and_missing_alignment(self):
+        spoken = "\U0001f4ac hello hello world"
+        chunk_id = self.chunk(spoken=spoken)
+        with patch("audio_processer.assign_text_embeddings") as embed:
+            response = self.edit_transcripts([{
+                "chunkId": chunk_id, "originalText": spoken,
+                "replacements": [{"start": 8, "end": 19, "text": "dear friend"},
+                                 {"start": 13, "end": 19, "text": "reader"}],
+            }])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["chunks"][0]["text"], "\U0001f4ac hello dear reader")
+        words = self.get(f"chunks/{chunk_id}")["words"]
+        self.assertEqual([word["word"] for word in words], ["\U0001f4ac", "hello", "dear", "reader"])
+        self.assertEqual([word["isEdited"] for word in words], [False, False, True, True])
+        embed.assert_called_once()
+
+    def test_transcript_save_rolls_back_all_chunks_when_embedding_fails(self):
+        ids = [self.chunk(confidences=[(0, "hello", 0.9), (1, "there", 0.8)]) for _ in range(2)]
+        edits = [{"chunkId": chunk_id, "originalText": "hello there", "replacements": [
+            {"start": 6, "end": 11, "text": "friend"},
+        ]} for chunk_id in ids]
+        with patch("audio_processer.assign_text_embeddings", side_effect=RuntimeError("unavailable")):
+            response = self.edit_transcripts(edits)
+        self.assertEqual(response.status_code, 503, response.text)
+        for chunk_id in ids:
+            result = self.get(f"chunks/{chunk_id}")
+            self.assertEqual(result["text"], "hello there")
+            self.assertFalse(any(word["isEdited"] for word in result["words"]))
+        with patch("audio_processer.assign_text_embeddings"):
+            self.assertEqual(self.edit_transcripts(edits).status_code, 200)
+
+    def test_transcript_edits_reject_stale_missing_and_invalid_changes(self):
+        chunk_id = self.chunk(confidences=[(0, "hello", 0.9), (1, "there", 0.8)])
+        edit = {"chunkId": chunk_id, "originalText": "hello there", "replacements": [
+            {"start": 6, "end": 11, "text": "friend"},
+        ]}
+        with patch("audio_processer.assign_text_embeddings") as embed:
+            self.assertEqual(self.edit_transcripts([{**edit, "originalText": "stale"}]).status_code, 409)
+            self.assertEqual(self.edit_transcripts([{**edit, "chunkId": chunk_id + 1}]).status_code, 404)
+            self.assertEqual(self.edit_transcripts([edit, edit]).status_code, 422)
+            for replacement in ({"start": 6, "end": 99, "text": "friend"},
+                                {"start": 6, "end": 11, "text": "  "},
+                                {"start": 7, "end": 11, "text": "friend"}):
+                self.assertEqual(self.edit_transcripts([{**edit, "replacements": [replacement]}]).status_code, 422)
+            noop = {**edit, "replacements": [{"start": 6, "end": 11, "text": "there"}]}
+            self.assertEqual(self.edit_transcripts([noop]).status_code, 200)
+            embed.assert_not_called()
+        self.assertEqual(self.get(f"chunks/{chunk_id}")["text"], "hello there")
+
     def test_reassignment_and_unassignment_recompute_both_profiles(self):
         first, second = self.person("First"), self.person("Second")
         source = self.chunk(voice=vector(2, 0), words=2)
@@ -623,12 +704,16 @@ class ExplorerTests(unittest.TestCase):
             with sessions.begin() as session:
                 session.add(SetupState(id=1, expected_languages=["de"]))
                 session.add(Recording(timestamp=123456789, language="de"))
+            with fresh_engine.begin() as connection:
+                connection.exec_driver_sql(f'ALTER TABLE "{schema}".transcription_word DROP COLUMN is_edited')
             database.initialize_database()
         with fresh_engine.connect() as connection:
             inspector = inspect(connection)
             self.assertEqual(set(inspector.get_table_names(schema=schema)), set(Base.metadata.tables))
             self.assertEqual({column["name"] for column in inspector.get_columns("recording", schema=schema)},
                              {"id", "timestamp", "language"})
+            word_columns = {column["name"]: column for column in inspector.get_columns("transcription_word", schema=schema)}
+            self.assertFalse(word_columns["is_edited"]["nullable"])
             indexes = dict(connection.execute(text(
                 "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = :schema"
             ), {"schema": schema}).all())

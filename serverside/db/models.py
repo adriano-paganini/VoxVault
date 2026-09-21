@@ -3,6 +3,7 @@ from __future__ import annotations
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     Double,
     ForeignKey,
     Index,
@@ -155,6 +156,8 @@ class TranscriptionWord(Base):
     raw_speaker_label: Mapped[str | None] = mapped_column(Text)
 
     confidence: Mapped[float | None] = mapped_column(Double)
+
+    is_edited: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     chunk: Mapped[TranscriptionChunk] = relationship(
         back_populates="words"

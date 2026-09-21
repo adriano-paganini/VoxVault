@@ -2,13 +2,14 @@
 
 import math
 import logging
+import re
 from functools import lru_cache
 
 from sqlalchemy import and_, case, func, literal, literal_column, or_, select, text
 from sqlalchemy.orm import joinedload, selectinload
 
 from db.database import SessionLocal
-from db.models import Person, Recording, TranscriptionChunk, TEXT_EMBEDDING_DIM, VOICE_EMBEDDING_DIM
+from db.models import Person, Recording, TranscriptionChunk, TranscriptionWord, TEXT_EMBEDDING_DIM, VOICE_EMBEDDING_DIM
 
 
 logger = logging.getLogger(__name__)
@@ -136,6 +137,7 @@ def _chunk_dict(chunk, similarity=None, match_score=None, keyword_match=None):
                 "endMs": word.end_ms,
                 "confidence": _confidence(word.confidence),
                 "speakerLabel": word.raw_speaker_label,
+                "isEdited": word.is_edited,
             }
             for word in sorted(chunk.words, key=lambda item: item.word_index)
         ],
@@ -383,6 +385,92 @@ def get_conversation(recording_id, q="", assignment="all"):
 def get_chunk(chunk_id):
     with SessionLocal() as session:
         return _chunk_dict(_get_chunk(session, chunk_id))
+
+
+def _replace_words(chunk, replacement):
+    start, end, text = replacement["start"], replacement["end"], replacement["text"].strip()
+    if not text or not 0 <= start < end <= len(chunk.text):
+        raise ExplorerError(422, "Select words and enter a non-empty replacement.")
+    if chunk.text[start:end] == text:
+        return False
+    before, selected, after = [], [], []
+    spans = []
+    cursor = 0
+
+    def fill_gap(end):
+        for match in re.finditer(r"\S+", chunk.text[cursor:end]):
+            spans.append((cursor + match.start(), cursor + match.end(), TranscriptionWord(
+                word=match.group(), start_ms=chunk.start_ms, end_ms=chunk.end_ms,
+                confidence=None, is_edited=False,
+            )))
+
+    for word in sorted(chunk.words, key=lambda item: item.word_index):
+        spoken = word.word.strip()
+        position = chunk.text.find(spoken, cursor) if spoken else -1
+        if position < 0:
+            raise ExplorerError(409, "Word alignment has changed. Reopen the inspector and retry.")
+        fill_gap(position)
+        cursor = position + len(spoken)
+        spans.append((position, cursor, word))
+    fill_gap(len(chunk.text))
+    for position, word_end, word in spans:
+        if word_end <= start:
+            before.append(word)
+        elif position >= end:
+            after.append(word)
+        elif position < start or word_end > end:
+            raise ExplorerError(422, "Select complete words to replace.")
+        else:
+            selected.append(word)
+    # Replacement words inherit the selected interval, without claiming new alignment accuracy.
+    replacements = [TranscriptionWord(
+        word=spoken,
+        start_ms=min((word.start_ms for word in selected), default=chunk.start_ms),
+        end_ms=max((word.end_ms for word in selected), default=chunk.end_ms),
+        raw_speaker_label=selected[0].raw_speaker_label if selected else None,
+        confidence=None,
+        is_edited=True,
+    ) for spoken in re.findall(r"\S+", text)]
+    chunk.words = before + replacements + after
+    for index, word in enumerate(chunk.words):
+        word.word_index = index
+    chunk.text = chunk.text[:start] + text + chunk.text[end:]
+    chunk.word_count = len(chunk.text.split())
+    return True
+
+
+def edit_transcripts(edits):
+    by_id = {edit["chunkId"]: edit for edit in edits}
+    if len(by_id) != len(edits):
+        raise ExplorerError(422, "Each chunk must appear only once.")
+    with SessionLocal.begin() as session:
+        chunks = [_get_chunk(session, chunk_id, lock=True) for chunk_id in sorted(by_id)]
+        changed = []
+        for chunk in chunks:
+            edit = by_id[chunk.id]
+            if chunk.text != edit["originalText"]:
+                raise ExplorerError(409, "A transcript changed since it was opened. Reopen the inspector and retry.")
+            modified = False
+            for replacement in edit["replacements"]:
+                modified = _replace_words(chunk, replacement) or modified
+            if modified:
+                changed.append(chunk)
+        if changed:
+            try:
+                from audio_processer import assign_text_embeddings
+
+                assign_text_embeddings(changed)
+                if any(_valid_vector(chunk.text_embedding, TEXT_EMBEDDING_DIM) is None for chunk in changed):
+                    raise ValueError("Invalid transcript embedding")
+            except Exception as exc:
+                logger.exception("Could not update corrected transcript embeddings")
+                raise ExplorerError(503, "Could not update text embeddings. Your edits have not been saved. Please retry.") from exc
+            people = _lock_persons(session, [chunk.person_id for chunk in changed])
+            session.flush()
+            for person in people.values():
+                _recompute_person(session, person)
+        session.flush()
+        return {"chunks": [_chunk_dict(chunk) for chunk in chunks]}
 
 
 def _person_name_order():

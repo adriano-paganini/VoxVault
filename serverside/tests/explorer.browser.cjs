@@ -10,6 +10,8 @@ async function fixture(page) {
   let deletions = 0;
   const searches = [];
   let failSearch = false;
+  let failTranscriptSave = false;
+  const transcriptSaves = [];
   let chunks = Array.from({ length: 26 }, (_, index) => ({
     id: index + 1, recordingId: index + 1, recordingTimestamp: 1700000000000 + index * 1000,
     chunkIndex: 0, language: 'en', text: `Conversation ${index + 1} about Thursday's meeting.`,
@@ -39,7 +41,8 @@ async function fixture(page) {
       durationMs: segments.at(-1)?.endMs || 0, personCount: new Set(segments.map(chunk => chunk.personId).filter(Boolean)).size,
       preview: segments[0]?.text || '', similarity: query ? 0.9 : null, matchScore: query ? matched.length * 0.9 : null,
       matchedChunkIds: matched.map(chunk => chunk.id),
-      chunks: segments.map(chunk => ({ ...chunk, matched: matched.includes(chunk) })),
+      chunks: segments.map(chunk => ({ ...chunk, matched: matched.includes(chunk),
+        matchType: !matched.includes(chunk) ? null : chunk.text.toLowerCase().includes(query.toLowerCase()) ? 'keyword' : 'semantic' })),
     };
   };
   const profile = person => {
@@ -77,6 +80,32 @@ async function fixture(page) {
       assert.equal(url.searchParams.has('min_similarity'), false);
       const id = Number(conversationMatch[1]);
       return recordingIds.includes(id) ? json(conversation(id, url)) : json({ detail: 'Conversation not found.' }, 404);
+    }
+    if (endpoint === '/transcripts') {
+      if (failTranscriptSave) return json({ detail: 'Could not update text embeddings. Please retry.' }, 503);
+      const edits = request.postDataJSON().chunks;
+      transcriptSaves.push(edits);
+      for (const edit of edits) {
+        const chunk = chunks.find(item => item.id === edit.chunkId);
+        assert.equal(chunk.text, edit.originalText);
+        for (const replacement of edit.replacements) {
+          const text = [...chunk.text];
+          const start = text.slice(0, replacement.start).join('').length;
+          const end = text.slice(0, replacement.end).join('').length;
+          let cursor = 0;
+          const words = chunk.words.map(word => {
+            const position = chunk.text.indexOf(word.word, cursor);
+            cursor = position + word.word.length;
+            return { ...word, position };
+          });
+          chunk.words = [...words.filter(word => word.position < start),
+            ...replacement.text.split(/\s+/).map(word => ({ word, isEdited: true, confidence: null })),
+            ...words.filter(word => word.position >= end)];
+          chunk.text = chunk.text.slice(0, start) + replacement.text + chunk.text.slice(end);
+          chunk.wordCount = chunk.text.split(/\s+/).length;
+        }
+      }
+      return json({ chunks: edits.map(edit => chunks.find(chunk => chunk.id === edit.chunkId)) });
     }
     const chunkMatch = endpoint.match(/^\/chunks\/(\d+)(\/person)?$/);
     if (chunkMatch) {
@@ -131,7 +160,9 @@ async function fixture(page) {
     }
     throw new Error(`Unexpected request: ${request.method()} ${url.pathname}`);
   });
-  return { failDeletion: value => { failDelete = value; }, failSearch: value => { failSearch = value; }, deletionCount: () => deletions, searches };
+  return { failDeletion: value => { failDelete = value; }, failSearch: value => { failSearch = value; },
+    failTranscriptSave: value => { failTranscriptSave = value; }, transcriptSaves,
+    deletionCount: () => deletions, searches };
 }
 
 async function fits(page) {
@@ -245,6 +276,72 @@ async function run(browser, viewport) {
   await page.locator('#close-inspector').click();
   assert.equal(await page.locator('#segment-120 .speaker-badge').textContent(), 'Taylor');
 
+  await page.locator('#segment-1').getByRole('button', { name: 'Inspect voice' }).click();
+  await page.locator('#selected-chunk .transcript .word').first().waitFor();
+  const editor = page.locator('#selected-chunk .transcript-editor');
+  await editor.locator('.word').nth(2).click();
+  await editor.locator('.word').nth(3).click({ modifiers: ['Shift'] });
+  assert.equal(await editor.getByRole('textbox', { name: 'Replacement words' }).inputValue(), "about Thursday's");
+  await editor.getByRole('textbox', { name: 'Replacement words' }).fill("regarding next week's");
+  await editor.getByRole('button', { name: 'Replace selected words' }).click();
+  assert.equal(await editor.locator('.word-edited').count(), 3);
+  assert.equal(data.transcriptSaves.length, 0);
+  await editor.locator('.word').first().focus();
+  await page.keyboard.press('Enter');
+  await editor.getByRole('textbox', { name: 'Replacement words' }).fill('Discussion');
+  await fits(page);
+  if (process.env.VOXVAULT_SCREENSHOT_DIR) {
+    await page.screenshot({ path: path.join(process.env.VOXVAULT_SCREENSHOT_DIR, `word-editor-${viewport.width}.png`) });
+  }
+  data.failTranscriptSave(true);
+  await page.locator('#close-inspector').click();
+  await page.locator('#inspector-error:not(.hidden)').waitFor();
+  assert.equal(await page.locator('#inspector').isVisible(), true);
+  assert.equal(await editor.locator('.word-edited').count(), 4);
+  assert.equal(data.transcriptSaves.length, 0);
+  data.failTranscriptSave(false);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('#inspector').open);
+  assert.equal(data.transcriptSaves.length, 1);
+  assert.equal(data.transcriptSaves[0].length, 1);
+  assert.equal(await page.locator('#segment-1 .transcript').textContent(), "Discussion 1 regarding next week's meeting.");
+  assert.equal(await page.locator('#segment-1 .word-edited').count(), 4);
+  await page.reload();
+  await page.locator('#segment-1 .word-edited').first().waitFor();
+  assert.equal(await page.locator('#segment-1 .word-edited').first().evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(216, 239, 255)');
+  await page.locator('#segment-1').getByRole('button', { name: 'Inspect voice' }).click();
+  await editor.locator('.word-edited').first().waitFor();
+  await editor.locator('.word-edited').first().click();
+  await editor.getByRole('textbox', { name: 'Replacement words' }).fill('Conversation');
+  await editor.getByRole('button', { name: 'Replace selected words' }).click();
+  const candidateEditor = page.locator('#candidate-results .transcript-editor[data-chunk-id="128"]');
+  await candidateEditor.locator('.word').first().click();
+  await candidateEditor.getByRole('textbox', { name: 'Replacement words' }).fill('Related');
+  await candidateEditor.getByRole('button', { name: 'Replace selected words' }).click();
+  await page.evaluate(() => window.voxvaultBack());
+  await page.waitForFunction(() => !document.querySelector('#inspector').open);
+  assert.equal(data.transcriptSaves.length, 2);
+  assert.deepEqual(data.transcriptSaves[1].map(edit => edit.chunkId).sort((a, b) => a - b), [1, 128]);
+  assert.equal(await page.locator('#segment-128 .word-edited').textContent(), 'Related');
+  await page.locator('#segment-129').getByRole('button', { name: 'Inspect voice' }).click();
+  await page.waitForFunction(() => document.querySelector('#selected-chunk-title').textContent === 'Selected chunk #129');
+  await page.locator('#inspector').evaluate(node => { node.scrollTop = 0; });
+  await editor.locator('.word').first().scrollIntoViewIfNeeded();
+  const firstWord = await editor.locator('.word').nth(0).boundingBox();
+  const secondWord = await editor.locator('.word').nth(1).boundingBox();
+  await page.mouse.move(firstWord.x + 1, firstWord.y + firstWord.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(secondWord.x + secondWord.width - 1, secondWord.y + secondWord.height / 2, { steps: 8 });
+  await page.mouse.up();
+  assert.equal(await editor.getByRole('textbox', { name: 'Replacement words' }).inputValue(), 'Context segment');
+  await editor.getByRole('textbox', { name: 'Replacement words' }).fill('Different passage');
+  await editor.getByRole('button', { name: 'Replace selected words' }).click();
+  await page.locator('#discard-transcripts').click();
+  assert.equal(await editor.locator('.word-edited').count(), 0);
+  assert.equal(await editor.locator('.transcript').textContent(), 'Context segment 30. Full dialogue remains visible.');
+  await page.locator('#close-inspector').click();
+  assert.equal(data.transcriptSaves.length, 2);
+
   await page.locator('#segment-1 .danger-icon').click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(data.deletionCount(), 0);
@@ -282,7 +379,7 @@ async function run(browser, viewport) {
   await fits(page);
   assert.deepEqual(errors, []);
   await page.close();
-  console.log(`PASS ${viewport.width}x${viewport.height}: conversation navigation, semantic search, highlights, speaker pagination/assignment, deletion, errors, layout`);
+  console.log(`PASS ${viewport.width}x${viewport.height}: conversations, word corrections, save retry, persistent highlights, keyboard/Back, search, speakers, deletion, layout`);
 }
 
 (async () => {

@@ -183,6 +183,14 @@ to recordings. Archive browsing does not require microphone permission.
 The initial chunk view shows Unassigned; the Association filter also offers
 All chunks and Assigned. Meaning search has been removed.
 
+In Speaker inspection, select a word, drag over a phrase, or Shift-click a
+range, then enter replacement words and apply the checkmark. Corrections stay
+light blue, including after reopening the conversation. Closing the inspector
+(including Escape or Android Back) saves all edited chunks and recomputes their
+text embeddings together. A failed save leaves the inspector and edits open
+for retry. Reloading or leaving the page with pending edits prompts before
+discarding them. Existing databases gain the word correction flag on startup.
+
 The trash action on each chunk asks for confirmation. The
 `DELETE /api/explorer/chunks/{chunk_id}` endpoint returns `204` on success and
 `404` for a missing chunk. It deletes the chunk's transcript, word timings,

@@ -64,6 +64,27 @@ class PersonAssignment(BaseModel):
     personId: int | None = Field(gt=0)
 
 
+class WordReplacement(BaseModel):
+    start: int = Field(ge=0)
+    end: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class TranscriptEdit(BaseModel):
+    chunkId: int = Field(gt=0)
+    originalText: str
+    replacements: list[WordReplacement] = Field(min_length=1, max_length=1000)
+
+
+class TranscriptEdits(BaseModel):
+    chunks: list[TranscriptEdit] = Field(min_length=1, max_length=100)
+
+
+@router.put("/transcripts")
+def edit_transcripts(body: TranscriptEdits):
+    return explorer_service.edit_transcripts([chunk.model_dump() for chunk in body.chunks])
+
+
 @router.get("/conversations")
 def conversations(
     q: str = Query(default="", max_length=2000),
