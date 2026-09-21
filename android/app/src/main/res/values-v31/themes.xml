@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.VoxVault" parent="Base.Theme.VoxVault">
+        <item name="android:windowSplashScreenBackground">#FDF9EA</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FDF9EA</item>
+    </style>
+</resources>
