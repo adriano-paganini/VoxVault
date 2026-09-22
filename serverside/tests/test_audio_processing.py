@@ -10,6 +10,7 @@ import numpy as np
 import whisperx
 
 import audio_processer as audio
+import ml_models
 from ml_models import ModelRegistry, RecordingSkipped
 from processing_queue import ProcessingQueue
 
@@ -55,7 +56,7 @@ class AudioProcessingTests(unittest.TestCase):
         self.text_loader = self.stack.enter_context(patch(
             "sentence_transformers.SentenceTransformer", return_value=self.text,
         ))
-        self.stack.enter_context(patch.dict("os.environ", {"HF_TOKEN": "test", "WHISPERX_LANGUAGE_MIN_CONFIDENCE": "0.7"}))
+        self.stack.enter_context(patch.dict("os.environ", {"HUGGINGFACE_TOKEN": "test", "WHISPERX_LANGUAGE_MIN_CONFIDENCE": "0.7"}))
         self.save = self.stack.enter_context(patch.object(audio.db_interaction, "save_recording"))
         self.pcm = np.ones(8000, dtype="<i2").tobytes()
 
@@ -187,6 +188,40 @@ class AudioProcessingTests(unittest.TestCase):
             results = list(executor.map(lambda _: self.registry.text(), range(12)))
         self.assertTrue(all(result is self.text for result in results))
         self.text_loader.assert_called_once()
+
+    def test_idle_cleanup_unloads_and_measures_each_model_category(self):
+        registry = ModelRegistry()
+        transcription = Mock()
+        ctranslate_model = transcription.model.model
+        ctranslate_model.unload_model.side_effect = lambda: self.assertIs(
+            registry._transcription, transcription,
+        )
+        registry._transcription = transcription
+        registry.alignment_models["en"] = (Mock(), {})
+        registry._diarization = Mock()
+        registry._speaker = Mock()
+        registry._text = Mock()
+
+        with patch.object(ml_models, "release_unused_memory") as reclaim, patch.object(
+            ml_models, "current_rss_mib", side_effect=[2500, 1800, 1400, 1000, 800, 700],
+        ) as rss, self.assertLogs("ml_models", level="INFO") as logs:
+            registry._release_idle(0)
+
+        ctranslate_model.unload_model.assert_called_once_with()
+        self.assertIsNone(registry._transcription)
+        self.assertEqual(registry.alignment_models, {})
+        self.assertIsNone(registry._diarization)
+        self.assertIsNone(registry._speaker)
+        self.assertIsNone(registry._text)
+        self.assertEqual(reclaim.call_count, 5)
+        self.assertEqual(rss.call_count, 6)
+        output = "\n".join(logs.output)
+        self.assertIn("active_sessions=0, timer_generation=0, current_generation=0", output)
+        for category in (
+            "transcription/VAD", "alignment models", "diarization",
+            "speaker embedding model", "text embedding model",
+        ):
+            self.assertIn(f"Released {category}; current_rss=", output)
 
     def test_prepared_vad_uses_installed_whisperx_transcribe_without_another_vad_pass(self):
         from whisperx.asr import FasterWhisperPipeline
