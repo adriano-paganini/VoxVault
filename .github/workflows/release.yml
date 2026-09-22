@@ -31,24 +31,53 @@ jobs:
             android/gradle/wrapper/gradle-wrapper.properties
             android/gradle/*.versions.toml
 
+      - name: Reconstruct release keystore
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          keystore_path="$RUNNER_TEMP/voxvault-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          test -s "$keystore_path"
+          chmod 600 "$keystore_path"
+          echo "ANDROID_KEYSTORE_PATH=$keystore_path" >> "$GITHUB_ENV"
+
       - name: Build release APK
         working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
           ./gradlew :app:assembleRelease --no-daemon
 
-      - name: Prepare APK artifact
+      - name: Verify signed release APK
         shell: bash
         run: |
+          set -euo pipefail
           shopt -s nullglob
           apks=(android/app/build/outputs/apk/release/*.apk)
           if (( ${#apks[@]} != 1 )); then
             echo "Expected exactly one release APK, found ${#apks[@]}" >&2
             exit 1
           fi
+          apksigner_path="$(find "$ANDROID_SDK_ROOT/build-tools" -type f -name apksigner -print | sort -V | tail -n 1)"
+          if [[ -z "$apksigner_path" ]]; then
+            echo "Could not find apksigner in the Android SDK" >&2
+            exit 1
+          fi
+          "$apksigner_path" verify --verbose "${apks[0]}"
+          echo "SIGNED_APK_PATH=${apks[0]}" >> "$GITHUB_ENV"
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist
-          cp "${apks[0]}" "dist/VoxVault-${version}.apk"
+          cp "$SIGNED_APK_PATH" "dist/VoxVault-${version}.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
@@ -56,6 +85,10 @@ jobs:
           name: voxvault-apk
           path: dist/*.apk
           if-no-files-found: error
+
+      - name: Remove release keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/voxvault-release.jks"
 
   build-docker:
     name: Build and push Docker image
