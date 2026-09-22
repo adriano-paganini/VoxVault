@@ -2,6 +2,7 @@ import os
 import logging
 import math
 from dataclasses import asdict, dataclass
+from functools import wraps
 import torch
 import db_interaction
 import setup_service
@@ -10,6 +11,14 @@ from ml_models import RecordingSkipped, device, models
 import db.models
 
 logger = logging.getLogger(__name__)
+
+
+def using_models(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with models.session():
+            return function(*args, **kwargs)
+    return wrapped
 
 
 def get_speaker_model():
@@ -81,7 +90,8 @@ def select_language(model, waveform, chunks, expected_languages):
     import numpy as np
 
     # Detect on up to 30 seconds of VAD speech, excluding leading silence and gaps.
-    remaining = SAMPLE_RATE * 30
+    max_idle = float(os.getenv("VOXVAULT_MODEL_IDLE_SECONDS", "30"))
+    remaining = int(SAMPLE_RATE * max_idle)
     speech = []
     for chunk in chunks:
         for start, end in chunk["segments"]:
@@ -140,6 +150,7 @@ def transcribe_speech(model, waveform, chunks, language):
         model.tokenizer = None
 
 
+@using_models
 @torch.inference_mode()
 def transcribe_with_whisperx(audio: bytes, progress, enrollment=False) -> dict:
     import whisperx
@@ -208,6 +219,7 @@ def result_to_words(result: dict) -> list[TranscriptWord]:
 
     return words
 
+@using_models
 def process_audio_bytes(audio: bytes, timestamp: int, progress=None, enrollment=False) -> AudioProcessingResult:
     progress = progress or (lambda stage, message: None)
     progress("validating", "Checking the recording before processing.")
@@ -264,6 +276,7 @@ def process_audio_bytes(audio: bytes, timestamp: int, progress=None, enrollment=
 
     return processed
 
+@using_models
 def assign_audio_embeddings(chunk_data):
     for chunk, audio in chunk_data:
         waveform = pcm_bytes_to_float32_mono(audio)
@@ -280,6 +293,7 @@ def assign_audio_embeddings(chunk_data):
             .tolist()
         )
 
+@using_models
 def assign_text_embeddings(chunks:list[db.models.TranscriptionChunk]):
     if not chunks:
         return
@@ -295,6 +309,7 @@ def assign_text_embeddings(chunks:list[db.models.TranscriptionChunk]):
     for chunk,embedding in zip(chunks, embeddings):
         chunk.text_embedding = embedding.tolist()
 
+@using_models
 def create_query_embedding(query: str) -> list[float]:
     with models.text_inference_lock, torch.inference_mode():
         embedding = get_text_embedding_model().encode(
