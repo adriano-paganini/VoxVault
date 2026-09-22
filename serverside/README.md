@@ -236,11 +236,12 @@ it in backups; it contains decrypted audio until each job finishes.
 Expected languages use standard Whisper codes, saved through
 `PUT /api/setup/languages`, for example `{"expectedLanguages":["en","de"]}`.
 One expected language bypasses detection. With multiple languages, detection
-uses up to 30 seconds of VAD speech and accepts only a configured language
-with confidence at least `0.7`. Set `WHISPERX_LANGUAGE_MIN_CONFIDENCE` between
-0 and 1 to adjust this threshold. Short speech is allowed; silence, unreliable
-or unexpected languages, unsupported alignment languages, and transcripts
-without usable aligned words are skipped without saving empty recordings.
+uses up to 30 seconds of VAD speech and accepts any configured language even
+when detection confidence is low. For unconfigured detections,
+`WHISPERX_LANGUAGE_MIN_CONFIDENCE` (default `0.7`) distinguishes unreliable
+from confident-but-unexpected results; both are skipped. Short speech is
+allowed; silence, unconfigured languages, unsupported alignment languages,
+and transcripts without usable aligned words are skipped without saving empty recordings.
 Enrollment follows the same language rules. Setup offers its existing English
 passage when English is selected, or topics to speak about in a selected
 language otherwise; the existing duration and voice-profile checks still apply.

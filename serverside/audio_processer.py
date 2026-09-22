@@ -107,15 +107,18 @@ def select_language(model, waveform, chunks, expected_languages):
         raise RecordingSkipped("no speech detected")
     # Faster Whisper exposes probability; WhisperX's wrapper drops it.
     language, probability, _ = model.model.detect_language(audio=np.concatenate(speech))
-    if language not in expected_languages:
-        raise RecordingSkipped(f"unexpected detected language: {language}")
+    if language in expected_languages:
+        logger.info(
+            "Detected configured language: %s (confidence=%s, accepted)", language, probability,
+        )
+        return language
+
     threshold = float(os.getenv("WHISPERX_LANGUAGE_MIN_CONFIDENCE", "0.7"))
     if not 0 <= threshold <= 1:
         raise ValueError("WHISPERX_LANGUAGE_MIN_CONFIDENCE must be between 0 and 1")
     if probability is None or not math.isfinite(probability) or not threshold <= probability <= 1:
         raise RecordingSkipped(f"unreliable language detection: {language} (confidence={probability})")
-    logger.info("Detected language: %s (%.2f, accepted)", language, probability)
-    return language
+    raise RecordingSkipped(f"unexpected detected language: {language}")
 
 
 def transcribe_speech(model, waveform, chunks, language):

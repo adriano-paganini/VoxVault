@@ -108,11 +108,19 @@ class AudioProcessingTests(unittest.TestCase):
         self.model.transcribe.assert_not_called()
         self.assert_no_downstream()
 
-    def test_low_or_missing_confidence_skips_safely(self):
+    def test_expected_language_bypasses_reliability_filter(self):
         self.languages.return_value = ("en", "de")
         for confidence in (.1, None, float("nan"), float("inf")):
             with self.subTest(confidence=confidence):
                 self.model.model.detect_language.return_value = ("en", confidence, [])
+                result = self.process()
+                self.assertEqual(result.language, "en")
+
+    def test_unexpected_low_or_missing_confidence_skips_as_unreliable(self):
+        self.languages.return_value = ("en", "de")
+        for confidence in (.1, None, float("nan"), float("inf")):
+            with self.subTest(confidence=confidence):
+                self.model.model.detect_language.return_value = ("jw", confidence, [])
                 with self.assertRaisesRegex(RecordingSkipped, "unreliable"):
                     self.process()
         self.model.transcribe.assert_not_called()
