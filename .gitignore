@@ -1,21 +1,41 @@
-# Android Studio
-.idea/
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.key
+
+# Android and Gradle
 *.iml
 .gradle/
 local.properties
 **/build/
+captures/
+.externalNativeBuild/
+.cxx/
 
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
+# Python environments, caches, and generated output
 .venv/
 venv/
-.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+dist/
+*.egg-info/
+serverside/models/
+serverside/voxvault-processing-*/
 
-# OS
+# IDEs
+.idea/
+.vscode/
+
+# OS metadata
 .DS_Store
 Thumbs.db
-
-# IDE
-.vscode/

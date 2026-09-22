@@ -172,7 +172,7 @@ async function fits(page) {
 }
 
 async function run(browser, viewport) {
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, colorScheme: process.env.COLOR_SCHEME || 'light' });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const data = await fixture(page);
@@ -308,7 +308,8 @@ async function run(browser, viewport) {
   assert.equal(await page.locator('#segment-1 .word-edited').count(), 4);
   await page.reload();
   await page.locator('#segment-1 .word-edited').first().waitFor();
-  assert.equal(await page.locator('#segment-1 .word-edited').first().evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(216, 239, 255)');
+  const editedBackground = process.env.COLOR_SCHEME === 'dark' ? 'rgb(36, 78, 101)' : 'rgb(216, 239, 255)';
+  assert.equal(await page.locator('#segment-1 .word-edited').first().evaluate(node => getComputedStyle(node).backgroundColor), editedBackground);
   await page.locator('#segment-1').getByRole('button', { name: 'Inspect voice' }).click();
   await editor.locator('.word-edited').first().waitFor();
   await editor.locator('.word-edited').first().click();

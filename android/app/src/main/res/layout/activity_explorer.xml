@@ -12,7 +12,7 @@
         android:layout_height="?attr/actionBarSize"
         app:navigationIcon="?attr/homeAsUpIndicator"
         app:navigationContentDescription="@string/recordings_title"
-        app:logo="@drawable/voxvault_icon"
+        app:logo="@drawable/voxvault_logo"
         app:logoDescription="@string/app_name"
         app:title="@string/archive_title">
 
