@@ -4,7 +4,7 @@ const path = require('node:path');
 const { chromium } = require('playwright');
 
 async function run(browser, viewport) {
-  const page = await browser.newPage({ viewport });
+  const page = await browser.newPage({ viewport, colorScheme: process.env.COLOR_SCHEME || 'light' });
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   let expectedLanguages = ['en'];

@@ -1,7 +1,10 @@
 .git
-.env
+.github
+.gitignore
+.env*
 .idea
 .venv
+.vscode
 __pycache__
 *.pyc
 *.pyo
@@ -15,6 +18,11 @@ htmlcov
 dist
 build
 *.egg-info
+models
+tests
+README.md
+test_main.http
+reset.sh
 Dockerfile
 docker-compose.yml
 *.key
