@@ -1,5 +1,7 @@
 FROM python:3.12-slim
 
+LABEL org.opencontainers.image.licenses="MIT"
+
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
@@ -19,5 +21,6 @@ RUN pip install -r requirements.txt \
 COPY db ./db
 COPY static ./static
 COPY *.py .
+COPY LICENSE .
 
 CMD ["python", "config.py"]

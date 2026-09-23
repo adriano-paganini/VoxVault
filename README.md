@@ -151,6 +151,10 @@ Back up the private key at `VOXVAULT_KEY_DIR_HOST/server-privatekey.key` securel
 > [!IMPORTANT]
 > Server-side transcripts, metadata and voice embeddings are not themselves encrypted by VoxVault. Protect access to the server and database accordingly.
 
+## License
+
+VoxVault is licensed under the [MIT License](LICENSE). Third-party libraries, models, and assets retain their respective licenses.
+
 ## Legal Disclaimer
 
 VoxVault is an experimental project and is provided **as is**.

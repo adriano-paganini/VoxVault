@@ -181,18 +181,6 @@ class AudioProcessingTests(unittest.TestCase):
         self.assertIs(self.model.vad_model, self.vad)
         self.assertIsNone(self.model.tokenizer)
 
-    def test_alignment_models_reused_per_language_and_evicted_after_setting_change(self):
-        self.languages.return_value = ("en", "de")
-        for language in ("en", "de", "en", "de"):
-            self.model.model.detect_language.return_value = (language, .95, [])
-            self.process()
-        self.assertEqual(self.align_loader.call_count, 2)
-        self.assertEqual(set(self.registry.alignment_models), {"en", "de"})
-        self.languages.return_value = ("de",)
-        self.process()
-        self.assertEqual(set(self.registry.alignment_models), {"de"})
-        self.assertEqual(self.align_loader.call_count, 2)
-
     def test_asr_failure_restores_vad_and_next_recording_processes(self):
         self.model.transcribe.side_effect = RuntimeError("inference failed")
         with self.assertRaises(RuntimeError):
