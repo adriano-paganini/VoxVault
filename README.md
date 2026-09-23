@@ -64,7 +64,6 @@ VOXVAULT_MODEL_IDLE_SECONDS=5
 VOXVAULT_PROCESSING_DIR=.
 
 POSTGRES_HOST=postgres
-POSTGRES_PORT=5432
 POSTGRES_DB=voxvault
 POSTGRES_USER=voxvault
 POSTGRES_PASSWORD=voxvault
@@ -84,7 +83,7 @@ Use `sh compose.sh` for Compose commands. This launcher ensures `.env` also take
 
 `WHISPERX_LANGUAGE_SAMPLE_SECONDS` controls language detection sampling independently of `VOXVAULT_MODEL_IDLE_SECONDS`, which only controls model unloading. `VOXVAULT_PROCESSING_DIR` must be a writable directory. Database credentials are shared by the backend and PostgreSQL; changing them does not update users in an existing database volume.
 
-For local development, set `POSTGRES_HOST=localhost`, use a writable key directory, and start the backend from `serverside` with `python config.py` using the project environment. Docker deployments use `POSTGRES_HOST=postgres`.
+The Compose backend connects to PostgreSQL at `postgres:5432` on the shared Docker network. PostgreSQL is not published on the host. For local development outside Docker, use a separate PostgreSQL instance listening on `localhost:5432`, set `POSTGRES_HOST=localhost`, use a writable key directory, and start the backend from `serverside` with `python config.py` using the project environment.
 
 #### Enable Speaker Diarization
 

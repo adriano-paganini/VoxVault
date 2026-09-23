@@ -19,7 +19,6 @@ class Settings(BaseModel):
     VOXVAULT_KEY_DIR_HOST: Path
     VOXVAULT_PUBLIC_URL: str
     POSTGRES_HOST: str
-    POSTGRES_PORT: int = Field(ge=1, le=65535)
     POSTGRES_DB: str
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str = Field(repr=False)
@@ -52,7 +51,7 @@ class Settings(BaseModel):
         return URL.create(
             "postgresql+psycopg", username=self.POSTGRES_USER,
             password=self.POSTGRES_PASSWORD, host=self.POSTGRES_HOST,
-            port=self.POSTGRES_PORT, database=self.POSTGRES_DB,
+            database=self.POSTGRES_DB,
         )
 
 
