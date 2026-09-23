@@ -95,6 +95,12 @@ sudo install \
   -m 640 \
   .env docker-compose.yml compose.sh \
   /opt/voxvault/
+```
+
+Switch to the `voxvault` user before entering its private deployment directory. Stay in this shell for step 5:
+
+```bash
+sudo -u voxvault -H sh
 cd /opt/voxvault
 ```
 
@@ -117,15 +123,16 @@ Keep the key directory private and out of public sync services.
 
 ### 5. Start VoxVault
 
-From the server directory, start Compose with the user chosen above:
+From the server directory, start Compose:
 
 ```bash
-sudo -u voxvault -H sh compose.sh up -d
+sh compose.sh up -d
+sh compose.sh ps
 ```
 
-With your normal Docker-enabled user, run `sh compose.sh up -d` instead. If you run Docker as root, use `sudo sh compose.sh up -d`.
+If you chose the dedicated `voxvault` user, run these commands inside the shell opened in step 4; you do not need another `sudo -u`. With your normal Docker-enabled user, run them from the directory containing `.env` and `compose.sh`.
 
-Check the containers or follow their logs with `sh compose.sh ps` and `sh compose.sh logs -f` using the same user. Always run Compose through `compose.sh` so values from `.env` take precedence over exported shell variables.
+Use `sh compose.sh logs -f` to follow the logs. Run Compose through `compose.sh` so values from `.env` take precedence over exported shell variables. Type `exit` when finished with the `voxvault` shell.
 
 ### 6. Finish Setup
 
