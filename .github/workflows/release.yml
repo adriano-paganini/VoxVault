@@ -148,6 +148,9 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
       - name: Download APK artifact
         uses: actions/download-artifact@v8
         with:
@@ -161,4 +164,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/*.apk \
             --repo "$GITHUB_REPOSITORY" \
             --title "VoxVault $GITHUB_REF_NAME" \
-            --generate-notes
+            --notes-file "release-notes/${GITHUB_REF_NAME}.md" \
+            --latest
