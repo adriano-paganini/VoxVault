@@ -17,6 +17,7 @@ class ResetTests(unittest.TestCase):
         self.project.mkdir()
         self.script = self.project / "reset.sh"
         self.script.write_bytes(RESET_SCRIPT.read_bytes())
+        (self.project / "compose.sh").write_bytes(RESET_SCRIPT.with_name("compose.sh").read_bytes())
         self.script.chmod(0o755)
         self.log = self.directory / "docker.log"
         binary_directory = self.directory / "bin"
@@ -24,6 +25,7 @@ class ResetTests(unittest.TestCase):
         docker = binary_directory / "docker"
         docker.write_text(
             '#!/bin/sh\n'
+            'if [ "$1" = compose ] && [ "$2" = --env-file ]; then shift 3; set -- compose "$@"; fi\n'
             'printf "%s|%s\\n" "$PWD" "$*" >> "$RESET_TEST_LOG"\n'
             'if [ "$*" = "${RESET_TEST_FAILURE:-}" ]; then exit 1; fi\n'
             'if [ "$*" = "image inspect voxvault-server:latest" ] && '

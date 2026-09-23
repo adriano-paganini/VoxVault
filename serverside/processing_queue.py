@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 import logging
-import os
+from config import settings
 from pathlib import Path
 from queue import Queue
 from tempfile import TemporaryDirectory
@@ -34,7 +34,7 @@ class ProcessingQueue:
             if self._thread is not None:
                 raise RuntimeError("Processing worker already started")
             self._directory = TemporaryDirectory(
-                prefix="voxvault-processing-", dir=os.getenv("VOXVAULT_PROCESSING_DIR", "."),
+                prefix="voxvault-processing-", dir=settings.VOXVAULT_PROCESSING_DIR,
             )
             self._thread = Thread(target=self._run, name="voxvault-audio-worker")
             self._accepting = True

@@ -1,5 +1,5 @@
-import os
 import time
+from config import settings
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -9,18 +9,15 @@ from db.models import Base
 
 
 engine = create_engine(
-    os.getenv(
-        "DATABASE_URL",
-        "postgresql+psycopg://voxvault:voxvault@localhost:5432/voxvault",
-    ),
+    settings.database_url,
     pool_pre_ping=True,
 )
 SessionLocal = sessionmaker(bind=engine)
 
 
 def initialize_database() -> None:
-    retries = int(os.getenv("DATABASE_INIT_RETRIES", "30"))
-    retry_delay = float(os.getenv("DATABASE_INIT_RETRY_DELAY_SECONDS", "2"))
+    retries = settings.DATABASE_INIT_RETRIES
+    retry_delay = settings.DATABASE_INIT_RETRY_DELAY_SECONDS
 
     for attempt in range(1, retries + 1):
         try:

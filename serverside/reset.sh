@@ -8,12 +8,12 @@ fi
 
 cd -- "$(dirname -- "$0")"
 
-docker compose --profile reset config --quiet
+sh ./compose.sh --profile reset config --quiet
 if ! docker image inspect voxvault-server:latest >/dev/null 2>&1; then
-    docker compose build voxvault
+    sh ./compose.sh build voxvault
 fi
 
-docker compose down -v
-docker compose --profile reset run --rm --no-deps reset-keys
+sh ./compose.sh down -v
+sh ./compose.sh --profile reset run --rm --no-deps reset-keys
 
-printf 'VoxVault reset complete. Start again with: sudo docker compose up -d --build\n'
+printf 'VoxVault reset complete. Start again with: sudo sh compose.sh up -d --build\n'

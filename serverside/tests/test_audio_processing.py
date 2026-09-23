@@ -56,7 +56,8 @@ class AudioProcessingTests(unittest.TestCase):
         self.text_loader = self.stack.enter_context(patch(
             "sentence_transformers.SentenceTransformer", return_value=self.text,
         ))
-        self.stack.enter_context(patch.dict("os.environ", {"HUGGINGFACE_TOKEN": "test", "WHISPERX_LANGUAGE_MIN_CONFIDENCE": "0.7"}))
+        self.stack.enter_context(patch.object(ml_models.settings, "HUGGINGFACE_TOKEN", "test"))
+        self.stack.enter_context(patch.object(audio.settings, "WHISPERX_LANGUAGE_MIN_CONFIDENCE", 0.7))
         self.save = self.stack.enter_context(patch.object(audio.db_interaction, "save_recording"))
         self.pcm = np.ones(8000, dtype="<i2").tobytes()
 
@@ -89,6 +90,16 @@ class AudioProcessingTests(unittest.TestCase):
         detected_audio = self.model.model.detect_language.call_args.kwargs["audio"]
         self.assertEqual(len(detected_audio), 4800)
         self.assertEqual(self.save.call_args.args[0].language, "de")
+
+    def test_language_sample_duration_is_independent_of_idle_cleanup(self):
+        waveform = np.ones(audio.SAMPLE_RATE * 10)
+        chunks = [{"segments": [(0, 10)]}]
+        with patch.object(audio.settings, "VOXVAULT_MODEL_IDLE_SECONDS", 0), patch.object(
+            audio.settings, "WHISPERX_LANGUAGE_SAMPLE_SECONDS", 3,
+        ):
+            language = audio.select_language(self.model, waveform, chunks, ("en", "de"))
+        self.assertEqual(language, "de")
+        self.assertEqual(len(self.model.model.detect_language.call_args.kwargs["audio"]), audio.SAMPLE_RATE * 3)
 
     def test_enrollment_uses_configured_language_and_skips_diarization(self):
         self.languages.return_value = ("de",)
@@ -282,7 +293,7 @@ class ProcessingQueueTests(unittest.TestCase):
             finally:
                 active -= 1
 
-        with TemporaryDirectory() as directory, patch.dict("os.environ", {"VOXVAULT_PROCESSING_DIR": directory}):
+        with TemporaryDirectory() as directory, patch.object(audio.settings, "VOXVAULT_PROCESSING_DIR", Path(directory)):
             worker = ProcessingQueue(process, finished.append)
             worker.start()
             try:

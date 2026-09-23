@@ -2,15 +2,12 @@ from contextlib import asynccontextmanager
 from io import BytesIO
 from json import dumps, loads
 import logging
-from os import getenv
 from threading import Lock
 from urllib.parse import quote
 
 import qrcode
 import qrcode.image.svg
-from dotenv import load_dotenv
-
-load_dotenv()
+from config import settings
 from Recording import Recording
 from db.database import initialize_database, SessionLocal
 from db.models import Recording as StoredRecording
@@ -140,7 +137,7 @@ async def explorer_ui():
 def setup_status(response: Response):
     response.headers["Cache-Control"] = "no-store"
     return {**setup_service.get_status(), "keysExist": key_exists(),
-            "publicUrl": getenv("VOXVAULT_PUBLIC_URL", "")}
+            "publicUrl": settings.VOXVAULT_PUBLIC_URL}
 
 
 @app.post("/api/setup/step")

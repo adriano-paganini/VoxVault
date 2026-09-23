@@ -1,4 +1,4 @@
-import os
+from config import settings
 import logging
 import math
 from dataclasses import asdict, dataclass
@@ -90,8 +90,7 @@ def select_language(model, waveform, chunks, expected_languages):
     import numpy as np
 
     # Detect on up to 30 seconds of VAD speech, excluding leading silence and gaps.
-    max_idle = float(os.getenv("VOXVAULT_MODEL_IDLE_SECONDS", "30"))
-    remaining = int(SAMPLE_RATE * max_idle)
+    remaining = int(SAMPLE_RATE * settings.WHISPERX_LANGUAGE_SAMPLE_SECONDS)
     speech = []
     for chunk in chunks:
         for start, end in chunk["segments"]:
@@ -113,7 +112,7 @@ def select_language(model, waveform, chunks, expected_languages):
         )
         return language
 
-    threshold = float(os.getenv("WHISPERX_LANGUAGE_MIN_CONFIDENCE", "0.7"))
+    threshold = settings.WHISPERX_LANGUAGE_MIN_CONFIDENCE
     if not 0 <= threshold <= 1:
         raise ValueError("WHISPERX_LANGUAGE_MIN_CONFIDENCE must be between 0 and 1")
     if probability is None or not math.isfinite(probability) or not threshold <= probability <= 1:
@@ -145,7 +144,7 @@ def transcribe_speech(model, waveform, chunks, language):
     model.vad_model = PreparedVad()
     try:
         return model.transcribe(
-            waveform, batch_size=int(os.getenv("WHISPERX_BATCH_SIZE", "8")), language=language,
+            waveform, batch_size=settings.WHISPERX_BATCH_SIZE, language=language,
         )
     finally:
         # Never leave a per-recording VAD adapter or tokenizer on the shared pipeline.

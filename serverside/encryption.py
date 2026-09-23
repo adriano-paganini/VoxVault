@@ -1,5 +1,5 @@
 import base64
-import os
+from config import settings
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric import x25519
@@ -20,8 +20,7 @@ from tink.proto import hpke_pb2, tink_pb2
 hybrid.register()
 streaming_aead.register()
 
-FILEPATH = os.getenv("VOXVAULT_PRIVATE_KEY_PATH", "voxvault_private.key")
-HOST_FILEPATH = os.getenv("VOXVAULT_PRIVATE_KEY_HOST_PATH", FILEPATH)
+FILEPATH = str(settings.private_key_path)
 
 
 def _key_path():
@@ -41,7 +40,7 @@ def private_key_path():
     return FILEPATH
 
 def private_key_host_path():
-    return HOST_FILEPATH
+    return FILEPATH
 
 def _encode_key(raw_key):
     return base64.b64encode(raw_key).decode("ascii")

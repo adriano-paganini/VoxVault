@@ -44,13 +44,11 @@ You can finish configuring the app after the backend is running.
 
 ### 2. Create `.env`
 
-Create a `.env` file in your VoxVault server directory:
+Copy `serverside/.env.example` to `.env` in your VoxVault server directory and edit it:
 
 ```env
 VOXVAULT_PORT=6100
 
-VOXVAULT_PRIVATE_KEY_PATH=/data/server-privatekey.key
-VOXVAULT_PRIVATE_KEY_HOST_PATH=/etc/voxvault/server-privatekey.key
 VOXVAULT_KEY_DIR_HOST=/etc/voxvault
 
 VOXVAULT_PUBLIC_URL=http://your-server-address:6100
@@ -59,10 +57,34 @@ WHISPERX_MODEL=large-v3
 WHISPERX_DEVICE=cpu
 WHISPERX_COMPUTE_TYPE=int8
 WHISPERX_BATCH_SIZE=8
+WHISPERX_CPU_THREADS=4
+WHISPERX_LANGUAGE_MIN_CONFIDENCE=0.7
+WHISPERX_LANGUAGE_SAMPLE_SECONDS=30
 VOXVAULT_MODEL_IDLE_SECONDS=5
+VOXVAULT_PROCESSING_DIR=.
+
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+POSTGRES_DB=voxvault
+POSTGRES_USER=voxvault
+POSTGRES_PASSWORD=voxvault
+DATABASE_INIT_RETRIES=30
+DATABASE_INIT_RETRY_DELAY_SECONDS=2
 
 HUGGINGFACE_TOKEN=hf_your_token_here
 ```
+
+The backend reads only this file, validates it at startup, and ignores exported shell variables for application settings. Every listed key is required; `HUGGINGFACE_TOKEN` and `VOXVAULT_PUBLIC_URL` may be empty. Restart the backend after changes. The file is mounted read-only in Docker and is never included in the image.
+
+Values are literal. Single-quote passwords or other values containing `$` so Compose also preserves them literally.
+
+Use `sh compose.sh` for Compose commands. This launcher ensures `.env` also takes precedence over exported shell variables when Docker resolves ports, database credentials, and mounts. Direct `docker compose` commands retain Docker's normal shell-variable precedence.
+
+`VOXVAULT_PORT` controls both the backend listener and published port. The key filename is always `server-privatekey.key` inside `VOXVAULT_KEY_DIR_HOST`; the directory has the same path on the host and in the container. Model cache locations are internal to the application and share the existing models volume.
+
+`WHISPERX_LANGUAGE_SAMPLE_SECONDS` controls language detection sampling independently of `VOXVAULT_MODEL_IDLE_SECONDS`, which only controls model unloading. `VOXVAULT_PROCESSING_DIR` must be a writable directory. Database credentials are shared by the backend and PostgreSQL; changing them does not update users in an existing database volume.
+
+For local development, set `POSTGRES_HOST=localhost`, use a writable key directory, and start the backend from `serverside` with `python config.py` using the project environment. Docker deployments use `POSTGRES_HOST=postgres`.
 
 #### Enable Speaker Diarization
 
@@ -124,6 +146,8 @@ WHISPERX_BATCH_SIZE=8
 
 `large-v3` provides high-quality transcription but requires considerably more resources than smaller Whisper models.
 
+**Only CPU inference is currently supported. GPU support is not yet available.** Keep `WHISPERX_DEVICE=cpu`; other devices are rejected at startup. The backend uses CPU PyTorch packages and has no CUDA selection or cleanup logic.
+
 #### Backend URL
 
 ```env
@@ -140,6 +164,7 @@ Download:
 
 ```text
 docker-compose.prod.yml
+compose.sh
 ```
 
 from the repository and rename it:
@@ -153,7 +178,8 @@ Your directory should now contain:
 ```text
 .
 ├── .env
-└── docker-compose.yml
+├── docker-compose.yml
+└── compose.sh
 ```
 
 ### 4. Prepare the Encryption-Key Directory
@@ -167,8 +193,6 @@ By default, VoxVault stores its server encryption key in:
 The corresponding configuration is:
 
 ```env
-VOXVAULT_PRIVATE_KEY_PATH=/data/server-privatekey.key
-VOXVAULT_PRIVATE_KEY_HOST_PATH=/etc/voxvault/server-privatekey.key
 VOXVAULT_KEY_DIR_HOST=/etc/voxvault
 ```
 
@@ -224,7 +248,7 @@ sudo install \
   -o voxvault \
   -g voxvault \
   -m 640 \
-  .env docker-compose.yml \
+  .env docker-compose.yml compose.sh \
   /opt/voxvault/
 ```
 
@@ -247,7 +271,6 @@ Change `.env` accordingly:
 
 ```env
 VOXVAULT_KEY_DIR_HOST=/home/YOUR_USER/.local/share/voxvault
-VOXVAULT_PRIVATE_KEY_HOST_PATH=/home/YOUR_USER/.local/share/voxvault/server-privatekey.key
 ```
 
 You can then run Docker Compose using your normal Docker-enabled user.
@@ -261,25 +284,25 @@ When using the dedicated `voxvault` user:
 
 ```bash
 cd /opt/voxvault
-sudo -u voxvault -H docker compose up -d
+sudo -u voxvault -H sh compose.sh up -d
 ```
 
 Check the containers:
 
 ```bash
-sudo -u voxvault -H docker compose ps
+sudo -u voxvault -H sh compose.sh ps
 ```
 
 View logs:
 
 ```bash
-sudo -u voxvault -H docker compose logs -f
+sudo -u voxvault -H sh compose.sh logs -f
 ```
 
 Alternatively, run:
 
 ```bash
-sudo docker compose up -d
+sudo sh compose.sh up -d
 ```
 
 This is simpler, but runs Docker Compose with root privileges.

@@ -23,4 +23,5 @@ sentence-transformers==5.7.0
 
 # Keep shared inference dependencies compatible and avoid resolver backtracking.
 transformers==4.57.6
+# WhisperX requires Triton on Linux even when inference uses CPU only.
 triton==3.4.0; sys_platform == "linux" and platform_machine == "x86_64"

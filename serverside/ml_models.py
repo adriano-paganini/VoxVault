@@ -7,12 +7,10 @@ import logging
 import math
 import os
 from threading import RLock, Timer
-
-import torch
-
+from config import settings
 
 logger = logging.getLogger(__name__)
-device = os.getenv("WHISPERX_DEVICE") or ("cuda:0" if torch.cuda.is_available() else "cpu")
+device = settings.WHISPERX_DEVICE
 
 
 class RecordingSkipped(ValueError):
@@ -22,8 +20,6 @@ class RecordingSkipped(ValueError):
 def release_unused_memory():
     """Release collectible tensors and, where supported, free allocator pages."""
     gc.collect()
-    if torch.cuda.is_initialized():
-        torch.cuda.empty_cache()
     try:
         trim = ctypes.CDLL(None).malloc_trim
     except (AttributeError, OSError):
@@ -46,7 +42,7 @@ def current_rss_mib():
 class ModelRegistry:
     def __init__(self, idle_seconds=None):
         self._idle_seconds = float(
-            os.getenv("VOXVAULT_MODEL_IDLE_SECONDS", "30") if idle_seconds is None else idle_seconds
+            settings.VOXVAULT_MODEL_IDLE_SECONDS if idle_seconds is None else idle_seconds
         )
         if not math.isfinite(self._idle_seconds) or self._idle_seconds < 0:
             raise ValueError("VOXVAULT_MODEL_IDLE_SECONDS must be a finite nonnegative number")
@@ -145,17 +141,14 @@ class ModelRegistry:
             if self._transcription is None:
                 import whisperx
 
-                name = os.getenv("WHISPERX_MODEL", "small")
-                target = torch.device(device)
+                name = settings.WHISPERX_MODEL
                 logger.info("Initializing WhisperX transcription and VAD models: %s", name)
                 self._transcription = whisperx.load_model(
-                    name, target.type, device_index=target.index or 0,
-                    compute_type=os.getenv(
-                        "WHISPERX_COMPUTE_TYPE", "float16" if target.type == "cuda" else "int8",
-                    ),
+                    name, device,
+                    compute_type=settings.WHISPERX_COMPUTE_TYPE,
                     # Each job supplies its selected language explicitly.
                     language=None,
-                    threads=int(os.getenv("WHISPERX_CPU_THREADS", "4")),
+                    threads=settings.WHISPERX_CPU_THREADS,
                 )
             return self._transcription
 
@@ -186,7 +179,7 @@ class ModelRegistry:
             return self.alignment_models[language]
 
     def diarization(self):
-        token = os.getenv("HUGGINGFACE_TOKEN")
+        token = settings.HUGGINGFACE_TOKEN
         if not token:
             return None
         with self._lock:
